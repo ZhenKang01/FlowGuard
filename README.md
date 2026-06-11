@@ -627,6 +627,138 @@ curl -s -X PATCH "http://localhost:8000/alerts/${ALERT_ID}/approve" | python -m 
 
 ---
 
+## AI Chatbot
+
+> **Note:** This replaces the originally-planned Botpress assistant with a
+> custom agent for tighter integration with the anomaly detection API, live
+> alerts, and Supabase RBAC.
+
+### Architecture — One Agent, Three Tools
+
+```
+User message
+    │
+    ▼
+Intent Router  (LLM call, temperature=0)
+    │
+    ├── "protocol_question"  ──►  Tool 1: RAG
+    │                              Load markdown docs → chunk → embed
+    │                              Retrieve top-3 chunks (cosine similarity)
+    │                              Answer grounded ONLY in retrieved text
+    │
+    ├── "log_issue"          ──►  Tool 2: Work Order
+    │                              Extract fields (location / issue / severity / desc)
+    │                              Ask for missing fields one at a time
+    │                              Present [ORDER_DRAFT] confirmation card
+    │                              Write to Supabase on explicit "yes"
+    │                              RBAC enforced server-side (viewer cannot create)
+    │
+    ├── "query_status"       ──►  Tool 3: Live Status
+    │                              Read _alerts store from FastAPI memory
+    │                              Summarise in plain language
+    │                              Surface HIGH-severity alerts clearly
+    │                              Recommend actions; never claim to auto-execute
+    │
+    └── "smalltalk"          ──►  Direct reply (no tool)
+
+Response: { reply, intent, confidence }
+                  └─ intent is shown as a badge in the React widget
+                     so the routing is visible for the demo
+```
+
+**Why a separate router LLM call?**
+Keeping classification independent means we can swap the classifier (fine-tuned
+model, keyword fallback) without changing the dispatch logic in `agent.py`.
+
+**Why cosine similarity over a vector DB?**
+The knowledge base has < 100 chunks from 4 docs.  In-memory numpy cosine
+similarity is faster to start, has zero new dependencies, and behaves
+identically to Pinecone/Chroma at this scale.
+
+**Why show the intent in the UI?**
+The routing decision is the point of the architecture.  Making it visible
+lets you demo agent behaviour in the individual report.
+
+### Knowledge Base
+
+Four realistic markdown docs in `anomaly_detection/chatbot/knowledge/`:
+
+| File | Contents |
+|---|---|
+| `leak_response_protocol.md` | 5-step leak response, severity table, valve isolation, documentation |
+| `sanitation_supply_thresholds.md` | Minimum stock levels (8 items), reorder process, storage requirements |
+| `hazard_reporting_procedure.md` | Hazard types, immediate vs formal reporting, who to notify table |
+| `valve_shutoff_policy.md` | Authorisation tiers (fixture → zone → riser → main), emergency shutoff, pre-planned outages |
+
+### Environment Variables
+
+| Variable | Where | Purpose |
+|---|---|---|
+| `OPENAI_API_KEY` | FastAPI server (shell/OS) | LLM API access — **server-side only, never in Vite** |
+| `OPENAI_CHAT_MODEL` | FastAPI server | Chat model (default: `gpt-4o-mini`) |
+| `OPENAI_EMBED_MODEL` | FastAPI server | Embedding model (default: `text-embedding-3-small`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | FastAPI server | Work-order writes via Supabase REST API |
+
+### How to Run
+
+```bash
+# Install the new dependency
+cd anomaly_detection
+pip install -r requirements.txt   # adds openai>=1.30.0
+
+# Set the API key before starting uvicorn
+export OPENAI_API_KEY=sk-...
+export SUPABASE_URL=https://your-project.supabase.co
+export SUPABASE_SERVICE_ROLE_KEY=...    # optional — for DB writes
+
+uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+The chat widget appears as a floating button in the bottom-right corner of the
+dashboard.  It is available on all pages and requires the user to be signed in
+(the widget reads `role` from `AuthContext`).
+
+### Sample Conversations (one per intent)
+
+**Intent: protocol_question**
+```
+User:  What's the escalation path for a moderate leak?
+Bot:   [badge: Protocol Q&A]
+       For a moderate leak (5–50 gal/hr), the protocol requires dispatching a
+       technician within 2 hours and notifying the facility manager. [Source: leak_response_protocol]
+```
+
+**Intent: log_issue**
+```
+User:  I need to report a burst pipe on the 3rd floor of Building B.
+Bot:   [badge: Work Order]
+       Got it. What's the severity — Low, Medium, or High?
+User:  High.
+Bot:   Can you give me a brief description of what you're seeing?
+User:  Water spraying from a joint under the sink, soaking the floor.
+Bot:   Here's what I'll log:
+       - Location: Building B, 3rd Floor
+       - Issue: Burst pipe
+       - Severity: High
+       - Description: Water spraying from a joint under the sink, soaking the floor.
+       Reply yes to confirm or no to cancel.
+       [ORDER_DRAFT card displayed]
+User:  yes
+Bot:   Work order created successfully. Status: Open.
+```
+
+**Intent: query_status**
+```
+User:  Are there any active leak alerts right now?
+Bot:   [badge: Live Status]
+       ⚠️ 1 HIGH-severity alert requires immediate attention:
+         Meter meter_02 — status: pending approval
+         Recommendation: Recommend shutting main valve for meter_02
+       Note: I can recommend shutting the valve, but a human must take that action.
+```
+
+---
+
 ## Application Pages
 
 | Page | Route Key | Minimum Role | Description |

@@ -51,7 +51,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 
 import httpx
 import uvicorn
@@ -61,6 +61,7 @@ from pydantic import BaseModel, Field, field_validator
 
 sys.path.insert(0, str(Path(__file__).parent))
 from inference import FlowGuardScorer, WINDOW_SIZE    # noqa: E402
+from chatbot.agent import FlowGuardAgent              # noqa: E402
 
 logger = logging.getLogger("flowguard.api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -138,11 +139,12 @@ class AlertCreate(BaseModel):
 
 # ── App lifecycle ─────────────────────────────────────────────────────────────
 _scorer: FlowGuardScorer | None = None
+_agent:  FlowGuardAgent  | None = None
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global _scorer
+    global _scorer, _agent
     try:
         _scorer = FlowGuardScorer()
         logger.info(
@@ -151,6 +153,13 @@ async def lifespan(_app: FastAPI):
         )
     except RuntimeError as exc:
         logger.warning("Scorer NOT loaded: %s", exc)
+
+    try:
+        _agent = FlowGuardAgent()
+        logger.info("Chat agent ready")
+    except Exception as exc:
+        logger.warning("Chat agent failed to initialise: %s", exc)
+
     yield
 
 
@@ -169,7 +178,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST", "PATCH"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -299,6 +308,59 @@ def approve_alert(alert_id: str) -> dict:
             logger.info("Alert approved: id=%s meter=%s", alert_id, alert["meter_id"])
             return alert
     raise HTTPException(status_code=404, detail=f"Alert {alert_id!r} not found.")
+
+
+# ── POST /chat ────────────────────────────────────────────────────────────────
+
+class ChatMessage(BaseModel):
+    role:    str   # "user" or "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message:              str
+    user_role:            str              = Field(default="viewer", description="Caller's RBAC role")
+    conversation_history: list[ChatMessage] = Field(default_factory=list)
+
+
+class ChatResponse(BaseModel):
+    reply:      str
+    intent:     str   = Field(description="Classified intent: protocol_question | log_issue | query_status | smalltalk | error")
+    confidence: float = Field(description="Router confidence 0–1")
+
+
+@app.post(
+    "/chat",
+    response_model=ChatResponse,
+    summary="Conversational agent — intent router + three tools",
+)
+def chat(req: ChatRequest) -> ChatResponse:
+    """
+    Single endpoint for the FlowGuard chat widget.
+
+    Steps:
+      1. Intent router classifies the message.
+      2. Dispatches to the matching tool (RAG / work-order / live-status / smalltalk).
+      3. Returns the reply AND the detected intent so the UI can display routing.
+
+    The LLM API key is server-side only — never exposed to the React client.
+    """
+    if _agent is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Chat agent not initialised. Check OPENAI_API_KEY and server logs.",
+        )
+
+    history = [{"role": m.role, "content": m.content} for m in req.conversation_history]
+
+    result = _agent.process(
+        message=req.message,
+        user_role=req.user_role,
+        conversation_history=history,
+        current_alerts=_alerts[-20:],
+        scorer=_scorer,
+    )
+    return ChatResponse(**result)
 
 
 # ── Dev runner ────────────────────────────────────────────────────────────────

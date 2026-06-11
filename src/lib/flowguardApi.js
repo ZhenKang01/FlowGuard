@@ -54,3 +54,24 @@ export function getAlerts() {
 export function approveAlert(alertId) {
   return request(`/alerts/${alertId}/approve`, { method: 'PATCH' })
 }
+
+/**
+ * Send a chat message to the FlowGuard agent.
+ * The LLM API key lives server-side only — this call never exposes it.
+ *
+ * @param {string} message
+ * @param {string} userRole  RBAC role from AuthContext
+ * @param {Array}  conversationHistory  [{role, content}, ...]
+ * @returns {{ reply: string, intent: string, confidence: number }}
+ */
+export function sendChatMessage(message, userRole, conversationHistory) {
+  return request('/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message,
+      user_role: userRole,
+      conversation_history: conversationHistory,
+    }),
+  })
+}
