@@ -2,140 +2,107 @@
 """
 src/api.py
 ==========
-Minimal FastAPI JSON endpoint wrapping the FlowGuard inference module.
-No HTML, no forms — pure JSON REST API.
+FastAPI JSON endpoint wrapping the FlowGuard inference module.
 
 Endpoints
 ---------
 
 POST /score
     Score a 24-hour water-usage window for a single meter.
-
-    Request body  (Content-Type: application/json)
-    ──────────────────────────────────────────────
-    {
-      "meter_id" : "meter_02",
-      "readings" : [12.3, 8.5, 6.1, ..., 45.2]
-    }
-
-    Fields
-        meter_id  string   required   one of "meter_00" … "meter_04"
-        readings  array    required   exactly 24 non-negative floats
-                                      in L/hr, oldest reading first
-
-    Response 200
-    ────────────
-    {
-      "meter_id"  : "meter_02",
-      "anomaly"   : true,
-      "score"     : 0.03124567,
-      "threshold" : 0.00491800,
-      "n_readings": 24
-    }
-
-    Fields
-        anomaly    bool    true if score >= threshold
-        score      float   MSE reconstruction error; higher = more unusual
-        threshold  float   calibrated anomaly threshold from eval_results.json
-
-    Response 400  Bad Request
-        {"detail": "Unknown meter_id 'meter_99'. Valid meters: [...]"}
-        {"detail": "Expected exactly 24 readings, got 10."}
-        {"detail": "All readings must be >= 0 (L/hr cannot be negative)."}
-
-    Response 422  Unprocessable Entity
-        Pydantic schema validation failure (wrong types, missing fields).
-
-    Response 503  Service Unavailable
-        {"detail": "Model not loaded. Run the pipeline first."}
-
+    On anomaly, fires a non-blocking POST to the n8n webhook (BackgroundTasks).
 
 GET /health
     Liveness check.
 
-    Response 200
-    ────────────
-    {"status": "ok", "model_loaded": true}
-
-
 GET /meters
     List the meter IDs the scorer currently knows about.
 
-    Response 200
-    ────────────
-    {"meter_ids": ["meter_00", "meter_01", "meter_02", "meter_03", "meter_04"]}
+POST /alerts
+    Store a new alert (called by n8n after routing).
 
+GET /alerts
+    Return the last 50 alerts from the in-memory store.
+
+PATCH /alerts/{alert_id}/approve
+    Mark a pending_approval alert as approved (human-in-the-loop).
 
 Usage
 -----
-    # From the project root:
-    python src/api.py
+    # From anomaly_detection/:
+    uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload
 
-    # Or via uvicorn directly:
-    cd src && uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+    # Set n8n webhook URL (optional — /score still works without it):
+    export N8N_WEBHOOK_URL=http://localhost:5678/webhook/flowguard-anomaly
 
-    # Quick curl tests (once running):
+    # curl tests:
     curl http://localhost:8000/health
-    curl http://localhost:8000/meters
+    curl http://localhost:8000/alerts
     curl -X POST http://localhost:8000/score \\
          -H "Content-Type: application/json" \\
-         -d '{"meter_id":"meter_00","readings":[30]*24}'
+         -d '{"meter_id":"meter_02","readings":[350,380,400,420,410,390,400,415,408,395,420,435,410,400,390,405,415,425,410,400,395,385,375,360]}'
 """
 
 from __future__ import annotations
 
+import logging
+import os
 import sys
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 sys.path.insert(0, str(Path(__file__).parent))
 from inference import FlowGuardScorer, WINDOW_SIZE    # noqa: E402
 
-# ── Pydantic request / response schemas ───────────────────────────────────────
+logger = logging.getLogger("flowguard.api")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+# ── Environment ───────────────────────────────────────────────────────────────
+
+# Set via shell: export N8N_WEBHOOK_URL=http://localhost:5678/webhook/flowguard-anomaly
+N8N_WEBHOOK_URL: str = os.getenv(
+    "N8N_WEBHOOK_URL",
+    "http://localhost:5678/webhook/flowguard-anomaly",
+)
+
+# ── In-memory alert store ─────────────────────────────────────────────────────
+# Stores alerts POSTed back by n8n after routing.  Survives only for the
+# lifetime of the process — a real deployment would use a database.
+_alerts: list[dict] = []
+
+
+# ── Pydantic schemas ──────────────────────────────────────────────────────────
 
 class ScoreRequest(BaseModel):
-    """
-    Body for POST /score.
-    Pydantic validates types and length before the handler runs.
-    """
-    meter_id: str = Field(
-        ...,
-        examples=["meter_02"],
-        description="Meter identifier — must match a key in models/scalers.json.",
-    )
+    meter_id: str = Field(..., examples=["meter_02"])
     readings: Annotated[list[float], Field(
         min_length=WINDOW_SIZE,
         max_length=WINDOW_SIZE,
-        description=(
-            f"Exactly {WINDOW_SIZE} consecutive hourly water-consumption "
-            "values in L/hr, oldest reading first."
-        ),
+        description=f"Exactly {WINDOW_SIZE} consecutive hourly L/hr values, oldest first.",
     )]
 
     @field_validator("readings")
     @classmethod
     def readings_non_negative(cls, v: list[float]) -> list[float]:
-        """Physical guard: flow cannot be negative."""
         if any(r < 0 for r in v):
-            raise ValueError(
-                "All readings must be >= 0 (L/hr cannot be negative)."
-            )
+            raise ValueError("All readings must be >= 0 (L/hr cannot be negative).")
         return v
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "meter_id": "meter_02",
-                "readings": [5.2, 3.1, 2.8, 2.5, 2.4, 3.9,
-                             18.4, 55.2, 82.1, 91.3, 88.7, 76.4,
-                             70.1, 74.8, 79.2, 81.0, 77.6, 60.3,
-                             44.1, 32.8, 22.5, 14.2, 9.6, 6.7],
+                "readings": [350,380,400,420,410,390,400,415,408,395,
+                             420,435,410,400,390,405,415,425,410,400,
+                             395,385,375,360],
             }
         }
     }
@@ -158,22 +125,32 @@ class MetersResponse(BaseModel):
     meter_ids: list[str]
 
 
-# ── App lifecycle — load scorer once at startup ───────────────────────────────
+class AlertCreate(BaseModel):
+    """Body for POST /alerts — typically sent by n8n after routing."""
+    meter_id:       str
+    score:          float
+    threshold:      float
+    severity:       str   = Field(description="low | medium | high")
+    timestamp:      str
+    status:         str   = Field(default="active")
+    recommendation: str   = Field(default="")
+
+
+# ── App lifecycle ─────────────────────────────────────────────────────────────
 _scorer: FlowGuardScorer | None = None
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Load the scorer on startup; nothing to clean up on shutdown."""
     global _scorer
     try:
         _scorer = FlowGuardScorer()
-        print(f"[FlowGuard] Scorer ready  |  "
-              f"meters={_scorer.meter_ids}  |  "
-              f"threshold={_scorer.threshold:.6f}")
+        logger.info(
+            "Scorer ready | meters=%s | threshold=%.6f",
+            _scorer.meter_ids, _scorer.threshold,
+        )
     except RuntimeError as exc:
-        # Server stays up but /score will return 503 until files exist
-        print(f"[FlowGuard] Scorer NOT loaded: {exc}")
+        logger.warning("Scorer NOT loaded: %s", exc)
     yield
 
 
@@ -181,37 +158,62 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="FlowGuard Anomaly Detection API",
     description=(
-        "LSTM autoencoder that scores 24-hour water-usage windows for leaks "
-        "and sensor faults.\n\n"
-        "**Prototype notice:** trained on synthetic data (hackathon build).\n\n"
-        "Call **POST /score** with a `meter_id` and 24 hourly L/hr readings. "
-        "Receive `anomaly: true/false` and a raw `score` for your own thresholding."
+        "LSTM autoencoder that scores 24-hour water-usage windows for leaks.\n\n"
+        "On anomaly, POST /score fires a non-blocking n8n webhook notification "
+        "so the dashboard receives live alerts via the three-layer pipeline."
     ),
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
-# CORS — allow the React dashboard (any origin during hackathon)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],        # tighten to dashboard origin in production
-    allow_methods=["GET", "POST"],
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
 )
 
 
 def _require_scorer() -> FlowGuardScorer:
-    """Raise 503 if scorer failed to load at startup."""
     if _scorer is None:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "Model not loaded. "
-                "Run the pipeline first:  "
-                "generate_data → preprocess → train → evaluate"
-            ),
+            detail="Model not loaded. Run the pipeline first: generate_data → preprocess → train → evaluate",
         )
     return _scorer
+
+
+def _severity(score: float, threshold: float) -> str:
+    """Map score/threshold ratio to severity label.
+
+    ratio < 1.5   → low    (marginal anomaly)
+    1.5 ≤ ratio < 3 → medium
+    ratio ≥ 3       → high  (human review required via n8n Wait node)
+    """
+    ratio = score / threshold
+    if ratio >= 3.0:
+        return "high"
+    if ratio >= 1.5:
+        return "medium"
+    return "low"
+
+
+def _notify_n8n(payload: dict) -> None:
+    """POST anomaly payload to n8n webhook — runs in a background thread.
+
+    Non-blocking and fault-tolerant: a timeout, connection error, or any other
+    failure is logged but never re-raised.  /score always returns to the caller
+    before this function even starts, so n8n outages are invisible to the
+    dashboard.
+    """
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            r = client.post(N8N_WEBHOOK_URL, json=payload)
+            r.raise_for_status()
+            logger.info("n8n notified for %s (severity=%s)", payload["meter_id"], payload["severity"])
+    except Exception as exc:
+        # Log and swallow — never propagate to the caller
+        logger.warning("n8n notification failed (non-fatal): %s", exc)
 
 
 # ── POST /score ───────────────────────────────────────────────────────────────
@@ -224,51 +226,86 @@ def _require_scorer() -> FlowGuardScorer:
         503: {"description": "Model not loaded — run pipeline first"},
     },
 )
-def score(req: ScoreRequest) -> ScoreResponse:
-    """
-    Score one 24-hour window for anomalous water usage.
-
-    - Internally applies the per-meter Min-Max scaler trained on normal data.
-    - Passes the normalised window through the LSTM autoencoder.
-    - Returns `anomaly: true` if the reconstruction error exceeds the
-      calibrated threshold.
-    """
+def score(req: ScoreRequest, background_tasks: BackgroundTasks) -> ScoreResponse:
+    """Score one window; on anomaly, enqueue a non-blocking n8n notification."""
     scorer = _require_scorer()
     try:
         result = scorer.score_window(req.meter_id, req.readings)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    if result["anomaly"]:
+        severity = _severity(result["score"], result["threshold"])
+        payload = {
+            "meter_id":  req.meter_id,
+            "score":     result["score"],
+            "threshold": result["threshold"],
+            "severity":  severity,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        # FastAPI runs this in a thread pool AFTER the response is sent —
+        # the client never waits for n8n to respond.
+        background_tasks.add_task(_notify_n8n, payload)
+
     return ScoreResponse(**result)
 
 
 # ── GET /health ───────────────────────────────────────────────────────────────
-@app.get(
-    "/health",
-    response_model=HealthResponse,
-    summary="Liveness check",
-)
+@app.get("/health", response_model=HealthResponse, summary="Liveness check")
 def health() -> HealthResponse:
-    """Returns 200 whether or not the model is loaded (use `model_loaded` field)."""
     return HealthResponse(status="ok", model_loaded=_scorer is not None)
 
 
 # ── GET /meters ───────────────────────────────────────────────────────────────
-@app.get(
-    "/meters",
-    response_model=MetersResponse,
-    summary="List valid meter IDs",
-)
+@app.get("/meters", response_model=MetersResponse, summary="List valid meter IDs")
 def meters() -> MetersResponse:
-    """List the meter IDs this instance can score."""
     return MetersResponse(meter_ids=_require_scorer().meter_ids)
+
+
+# ── POST /alerts ──────────────────────────────────────────────────────────────
+@app.post(
+    "/alerts",
+    summary="Store an alert (called by n8n after routing)",
+    status_code=201,
+)
+def create_alert(body: AlertCreate) -> dict:
+    """n8n POSTs here after deciding severity and appending its recommendation."""
+    alert = {
+        "id":             str(uuid.uuid4()),
+        **body.model_dump(),
+    }
+    _alerts.append(alert)
+    logger.info("Alert stored: id=%s meter=%s severity=%s", alert["id"], alert["meter_id"], alert["severity"])
+    return alert
+
+
+# ── GET /alerts ───────────────────────────────────────────────────────────────
+@app.get("/alerts", summary="Return recent alerts")
+def get_alerts() -> dict:
+    """Returns the last 50 alerts (most recent last).  Dashboard polls this."""
+    return {"alerts": _alerts[-50:]}
+
+
+# ── PATCH /alerts/{alert_id}/approve ─────────────────────────────────────────
+@app.patch(
+    "/alerts/{alert_id}/approve",
+    summary="Approve a pending_approval alert (human-in-the-loop)",
+)
+def approve_alert(alert_id: str) -> dict:
+    """Set status to 'approved'.  Returns the updated alert or 404."""
+    for alert in _alerts:
+        if alert["id"] == alert_id:
+            alert["status"] = "approved"
+            logger.info("Alert approved: id=%s meter=%s", alert_id, alert["meter_id"])
+            return alert
+    raise HTTPException(status_code=404, detail=f"Alert {alert_id!r} not found.")
 
 
 # ── Dev runner ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Run from the project root: python src/api.py
     uvicorn.run(
         "api:app",
-        app_dir=str(Path(__file__).parent),   # so uvicorn finds api.py in src/
+        app_dir=str(Path(__file__).parent),
         host="0.0.0.0",
         port=8000,
         reload=False,

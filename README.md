@@ -19,9 +19,14 @@
    - [Pipeline Overview](#pipeline-overview)
    - [Running the Pipeline](#running-the-pipeline)
    - [API Reference](#api-reference)
-8. [Application Pages](#application-pages)
-9. [Environment Variables](#environment-variables)
-10. [Team](#team)
+8. [Three-Layer Integration](#three-layer-integration)
+   - [How the Layers Connect](#how-the-layers-connect)
+   - [Local Run Sequence](#local-run-sequence)
+   - [Environment Variables](#environment-variables-1)
+   - [End-to-End curl Test](#end-to-end-curl-test)
+9. [Application Pages](#application-pages)
+10. [Environment Variables](#environment-variables)
+11. [Team](#team)
 
 ---
 
@@ -481,6 +486,147 @@ curl -X POST http://localhost:8000/score \
 
 ---
 
+## Three-Layer Integration
+
+FlowGuard's live anomaly path connects three independently runnable services:
+
+```
+React Dashboard  ──POST /score──►  FastAPI (LSTM model)  ──webhook──►  n8n workflow
+      ▲                                     │                                │
+      │                                     │  BackgroundTask               │
+      │                                     ▼  (non-blocking)               │
+      └────────────GET /alerts◄─────  in-memory store  ◄──POST /alerts──────┘
+           (polls every 5 s)
+```
+
+### How the Layers Connect
+
+| Layer | Technology | Role |
+|---|---|---|
+| **Layer 1 — Dashboard** | React 19 + Vite | Sends 24-hr reading windows to FastAPI; polls `/alerts` every 5 s to display routed alerts; Approve button calls `PATCH /alerts/{id}/approve` |
+| **Layer 2 — Model API** | FastAPI + PyTorch LSTM | Scores windows; on anomaly fires a non-blocking POST to n8n (via `BackgroundTasks` — client never waits); stores alerts POSTed back by n8n |
+| **Layer 3 — Workflow** | n8n | Receives anomaly payload; routes by severity (low/medium → auto-log, high → pending_approval + human review); POSTs structured alert back to FastAPI |
+
+**Key design choices:**
+
+- **Non-blocking n8n call**: `BackgroundTasks.add_task(_notify_n8n, payload)` runs in a thread pool *after* the HTTP response is sent. If n8n is down, `/score` still returns the anomaly verdict normally — the failure is only logged.
+- **In-memory store**: alerts are held in a Python list (`_alerts`) for the hackathon. A production build would persist to a database.
+- **Poll instead of WebSocket**: `setInterval` + `clearInterval` (with useEffect cleanup) is simpler than a WebSocket and sufficient at 5 s resolution.
+
+### Local Run Sequence
+
+Run each command in a separate terminal:
+
+**Step 1 — Train the model (first time only)**
+
+```bash
+cd anomaly_detection
+pip install -r requirements.txt
+python src/generate_data.py
+python src/preprocess.py
+python src/train.py
+python src/evaluate.py
+```
+
+**Step 2 — Start the FastAPI service**
+
+```bash
+cd anomaly_detection
+export N8N_WEBHOOK_URL=http://localhost:5678/webhook/flowguard-anomaly
+uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**Step 3 — Start n8n**
+
+```bash
+npx n8n
+# open http://localhost:5678
+# import n8n/FLOW_SPEC.md JSON skeleton → activate workflow
+```
+
+**Step 4 — Start the React dashboard**
+
+```bash
+cd c:/FlowGuard
+npm run dev
+# open http://localhost:5173
+```
+
+**Step 5 — Trigger a reading**
+
+Open the dashboard → navigate to **Leak Alerts** → the LiveScanPanel calls
+`POST /score` for all 5 meters automatically. meter_02 (sustained ~400 L/hr)
+will register as an anomaly, fire n8n, and the alert will appear in the
+IncomingAlertsPanel within 5 seconds.
+
+### Environment Variables
+
+| Variable | Where | Required | Description |
+|---|---|---|---|
+| `VITE_SUPABASE_URL` | `.env` (Vite) | Yes | Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | `.env` (Vite) | Yes | Supabase anonymous API key |
+| `VITE_FLOWGUARD_API_URL` | `.env` (Vite) | No | FastAPI base URL (default: `http://localhost:8000`) |
+| `N8N_WEBHOOK_URL` | shell / OS env | No | n8n webhook URL (default: `http://localhost:5678/webhook/flowguard-anomaly`) |
+
+`N8N_WEBHOOK_URL` is a Python/OS env var, not a Vite var — set it in your
+shell before starting uvicorn. It is intentionally absent from `.env` so it
+doesn't end up bundled into the frontend build.
+
+### End-to-End curl Test
+
+**1. Check the model is loaded**
+
+```bash
+curl http://localhost:8000/health
+# {"status":"ok","model_loaded":true}
+```
+
+**2. Score an anomalous window (meter_02)**
+
+```bash
+curl -s -X POST http://localhost:8000/score \
+  -H "Content-Type: application/json" \
+  -d '{"meter_id":"meter_02","readings":[350,380,400,420,410,390,400,415,408,395,420,435,410,400,390,405,415,425,410,400,395,385,375,360]}' \
+  | python -m json.tool
+# {"meter_id":"meter_02","anomaly":true,"score":0.0431...,"threshold":0.0049...,"n_readings":24}
+```
+
+FastAPI fires `_notify_n8n` in the background immediately after returning this response.
+
+**3. Simulate n8n posting an alert back (bypass n8n for quick demo)**
+
+```bash
+curl -s -X POST http://localhost:8000/alerts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "meter_id":  "meter_02",
+    "score":     0.04312,
+    "threshold": 0.00491,
+    "severity":  "high",
+    "timestamp": "2026-06-11T08:23:11.412Z",
+    "status":    "pending_approval",
+    "recommendation": "Recommend shutting main valve for meter_02"
+  }' | python -m json.tool
+# {"id":"<uuid>","meter_id":"meter_02","status":"pending_approval",...}
+```
+
+**4. Fetch alerts (what the dashboard polls)**
+
+```bash
+curl http://localhost:8000/alerts | python -m json.tool
+# {"alerts":[{"id":"<uuid>","severity":"high","status":"pending_approval",...}]}
+```
+
+**5. Approve the alert (what the Approve button calls)**
+
+```bash
+ALERT_ID=$(curl -s http://localhost:8000/alerts | python -c "import sys,json; a=json.load(sys.stdin)['alerts']; print(a[-1]['id'])")
+curl -s -X PATCH "http://localhost:8000/alerts/${ALERT_ID}/approve" | python -m json.tool
+# {"id":"<uuid>","status":"approved",...}
+```
+
+---
+
 ## Application Pages
 
 | Page | Route Key | Minimum Role | Description |
@@ -498,12 +644,14 @@ curl -X POST http://localhost:8000/score \
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|---|---|---|
-| `VITE_SUPABASE_URL` | Yes | Your Supabase project URL (e.g. `https://xyz.supabase.co`) |
-| `VITE_SUPABASE_ANON_KEY` | Yes | Supabase anonymous/public API key |
+| Variable | Where | Required | Description |
+|---|---|---|---|
+| `VITE_SUPABASE_URL` | `.env` (Vite) | Yes | Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | `.env` (Vite) | Yes | Supabase anonymous API key |
+| `VITE_FLOWGUARD_API_URL` | `.env` (Vite) | No | FastAPI base URL (default: `http://localhost:8000`) |
+| `N8N_WEBHOOK_URL` | shell / OS env | No | n8n webhook URL (default: `http://localhost:5678/webhook/flowguard-anomaly`) |
 
-**Never commit `.env` to version control.** It is listed in `.gitignore`. For CI/CD or hosted deployment, inject these values as environment secrets in your platform's settings.
+**Never commit `.env` to version control.** It is listed in `.gitignore`. `N8N_WEBHOOK_URL` is a shell env var — set it before starting uvicorn, not in `.env`.
 
 ---
 

@@ -201,6 +201,18 @@ export const buildingsList = ['All Buildings', 'Building A', 'Building B', 'Buil
 
 export const notificationsData = [
   { id: 1, title: 'Critical leak detected',      message: 'Building A — 4th Floor Restroom, 45 gal/hr', time: '10 min ago', read: false },
-  { id: 2, title: 'WO-2041 assigned',             message: 'Fix leaking pipe in 4F → Plumbing team',      time: '32 min ago', read: false },
+  { id: 2, title: 'WO-2041 assigned',             message: 'Fix leaking pipe in 4F -> Plumbing team',     time: '32 min ago', read: false },
   { id: 3, title: 'Supply alert: Hand Sanitizer', message: 'Stock at 20% in Building C Lobby',            time: '1 hr ago',   read: true  },
 ]
+
+// 24-hour reading windows (L/hr, hourly, oldest first) sent to the LSTM model.
+// These are fixed mock values — we have no live sensors.
+// The anomaly VERDICT still comes from the real model on every call.
+// meter_02: sustained ~400 L/hr, well above its training range [3.2, 171.4] → model flags it.
+export const meterReadings = {
+  meter_00: [  8,  6,  5,  4,  4,  5, 15, 48, 80, 95, 88, 82, 70, 64, 60, 72, 85, 80, 60, 44, 30, 20, 14,  9 ],
+  meter_01: [  5,  4,  3,  3,  3,  4, 12, 38, 68, 82, 76, 70, 58, 53, 50, 62, 74, 68, 50, 37, 25, 16, 10,  6 ],
+  meter_02: [350,380,400,420,410,390,400,415,408,395,420,435,410,400,390,405,415,425,410,400,395,385,375,360],
+  meter_03: [  6,  5,  4,  4,  4,  5, 14, 42, 72, 88, 82, 76, 64, 59, 55, 68, 80, 74, 56, 41, 28, 18, 11,  7 ],
+  meter_04: [  5,  4,  3,  3,  3,  4, 13, 40, 70, 85, 78, 72, 60, 55, 52, 64, 76, 70, 52, 39, 26, 17, 10,  6 ],
+}
