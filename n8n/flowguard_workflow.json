@@ -1,0 +1,363 @@
+{
+  "name": "FlowGuard — Anomaly Router",
+  "nodes": [
+
+    {
+      "id": "aa11bb22-cc33-dd44-ee55-ff6677889900",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [60, 60],
+      "parameters": {
+        "content": "## FlowGuard Anomaly Router\n\nReceives a POST from FastAPI `/score` whenever the LSTM model flags a meter.\n\n**Routing:**\n- `low` or `medium` → formatted as `status: active` → POST `/alerts`\n- `high` → formatted as `status: pending_approval`, `needs_approval: true` → POST `/alerts`\n\nThe React dashboard polls `/alerts` every 5 s.\nHigh-severity alerts show an **Approve** button — a human must click it.\nn8n only **recommends**; it never executes the shutoff.",
+        "height": 240,
+        "width": 520,
+        "color": 3
+      }
+    },
+
+    {
+      "id": "11223344-5566-7788-99aa-bbccddeeff00",
+      "name": "FlowGuard Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [640, 320],
+      "webhookId": "f10wg4rd-an0m-4ly-w3bh-00k000000001",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "flowguard-anomaly",
+        "responseMode": "onReceived",
+        "responseData": "noData",
+        "options": {}
+      }
+    },
+
+    {
+      "id": "22334455-6677-8899-aabb-ccddeeff0011",
+      "name": "Route by Severity",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [880, 320],
+      "parameters": {
+        "mode": "rules",
+        "options": {},
+        "rules": {
+          "rules": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "rule-low",
+                    "leftValue": "={{ $json.severity }}",
+                    "rightValue": "low",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "low"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "rule-medium",
+                    "leftValue": "={{ $json.severity }}",
+                    "rightValue": "medium",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "medium"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "rule-high",
+                    "leftValue": "={{ $json.severity }}",
+                    "rightValue": "high",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "high"
+            }
+          ]
+        }
+      }
+    },
+
+    {
+      "id": "33445566-7788-99aa-bbcc-ddeeff001122",
+      "name": "Format Normal Alert",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 200],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "sn-01",
+              "name": "meter_id",
+              "value": "={{ $json.meter_id }}",
+              "type": "string"
+            },
+            {
+              "id": "sn-02",
+              "name": "severity",
+              "value": "={{ $json.severity }}",
+              "type": "string"
+            },
+            {
+              "id": "sn-03",
+              "name": "score",
+              "value": "={{ $json.score }}",
+              "type": "number"
+            },
+            {
+              "id": "sn-04",
+              "name": "threshold",
+              "value": "={{ $json.threshold }}",
+              "type": "number"
+            },
+            {
+              "id": "sn-05",
+              "name": "timestamp",
+              "value": "={{ $json.timestamp }}",
+              "type": "string"
+            },
+            {
+              "id": "sn-06",
+              "name": "status",
+              "value": "active",
+              "type": "string"
+            },
+            {
+              "id": "sn-07",
+              "name": "needs_approval",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "sn-08",
+              "name": "message",
+              "value": "={{ 'Anomaly on ' + $json.meter_id + ' | severity: ' + $json.severity + ' | score: ' + $json.score.toFixed(5) + ' | threshold: ' + $json.threshold.toFixed(5) }}",
+              "type": "string"
+            },
+            {
+              "id": "sn-09",
+              "name": "recommendation",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+
+    {
+      "id": "44556677-8899-aabb-ccdd-eeff00112233",
+      "name": "POST Alert (Normal)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1380, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/alerts",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    },
+
+    {
+      "id": "55667788-99aa-bbcc-ddee-ff0011223344",
+      "name": "Format High Alert",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 460],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "sh-01",
+              "name": "meter_id",
+              "value": "={{ $json.meter_id }}",
+              "type": "string"
+            },
+            {
+              "id": "sh-02",
+              "name": "severity",
+              "value": "high",
+              "type": "string"
+            },
+            {
+              "id": "sh-03",
+              "name": "score",
+              "value": "={{ $json.score }}",
+              "type": "number"
+            },
+            {
+              "id": "sh-04",
+              "name": "threshold",
+              "value": "={{ $json.threshold }}",
+              "type": "number"
+            },
+            {
+              "id": "sh-05",
+              "name": "timestamp",
+              "value": "={{ $json.timestamp }}",
+              "type": "string"
+            },
+            {
+              "id": "sh-06",
+              "name": "status",
+              "value": "pending_approval",
+              "type": "string"
+            },
+            {
+              "id": "sh-07",
+              "name": "needs_approval",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "sh-08",
+              "name": "message",
+              "value": "={{ 'HIGH anomaly on ' + $json.meter_id + ' — score ' + $json.score.toFixed(5) + ' (' + (($json.score / $json.threshold) * 100 - 100).toFixed(0) + '% above threshold). HUMAN ACTION REQUIRED before any physical intervention.' }}",
+              "type": "string"
+            },
+            {
+              "id": "sh-09",
+              "name": "recommendation",
+              "value": "={{ 'Recommend shutting main valve for ' + $json.meter_id + ' — requires human confirmation before any action is taken' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+
+    {
+      "id": "66778899-aabb-ccdd-eeff-001122334455",
+      "name": "POST Alert (High — Pending Approval)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1380, 460],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/alerts",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      }
+    },
+
+    {
+      "id": "7788aabb-ccdd-eeff-0011-223344556677",
+      "name": "HITL Ethics Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1100, 640],
+      "parameters": {
+        "content": "## ⚠️ Human-in-the-Loop\n\nThis branch **recommends** — it does **not** execute.\n\n`needs_approval: true` + `status: pending_approval` tells FastAPI and the React dashboard that this alert requires sign-off.\n\nThe operator clicks **Approve** in the dashboard → `PATCH /alerts/{id}/approve` is called → status becomes `approved`.\n\nNo physical action (valve shutoff, etc.) is auto-executed by this workflow.",
+        "height": 210,
+        "width": 400,
+        "color": 4
+      }
+    }
+
+  ],
+
+  "connections": {
+    "FlowGuard Webhook": {
+      "main": [
+        [
+          { "node": "Route by Severity", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Route by Severity": {
+      "main": [
+        [
+          { "node": "Format Normal Alert", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Format Normal Alert", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Format High Alert", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Format Normal Alert": {
+      "main": [
+        [
+          { "node": "POST Alert (Normal)", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Format High Alert": {
+      "main": [
+        [
+          { "node": "POST Alert (High — Pending Approval)", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c3d4e5f6-a7b8-9012-cdef-abcdef012345",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "00000000-0000-0000-0000-000000000000"
+  },
+  "id": "FlowGuardAnomalyRouter",
+  "tags": []
+}

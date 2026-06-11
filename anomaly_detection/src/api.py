@@ -135,6 +135,9 @@ class AlertCreate(BaseModel):
     timestamp:      str
     status:         str   = Field(default="active")
     recommendation: str   = Field(default="")
+    # Fields added for the n8n workflow (workflow sets these explicitly)
+    needs_approval: bool  = Field(default=False, description="True → human must approve before action")
+    message:        str   = Field(default="", description="Human-readable alert summary from n8n")
 
 
 # ── App lifecycle ─────────────────────────────────────────────────────────────
