@@ -1,30 +1,39 @@
-import { workOrdersData } from '../../data/mockData';
-import { FileText, MoreHorizontal } from 'lucide-react';
+import { useState } from 'react'
+import { workOrdersData } from '../../data/mockData'
+import { FileText, MoreHorizontal } from 'lucide-react'
+import Toast from '../ui/Toast'
 
-export default function WorkOrders() {
+export default function WorkOrders({ onNavigate }) {
+  const [toast, setToast] = useState(null)
+
   const getPriorityBadge = (priority) => {
     const styles = {
-      High: 'bg-red-50 text-red-700 border-red-100',
+      High:   'bg-red-50 text-red-700 border-red-100',
       Medium: 'bg-orange-50 text-orange-700 border-orange-100',
-      Low: 'bg-slate-50 text-slate-700 border-slate-200'
-    };
-    return `text-xs font-medium px-2 py-1 rounded-md border ${styles[priority] || styles.Low}`;
-  };
+      Low:    'bg-slate-50 text-slate-700 border-slate-200',
+    }
+    return `text-xs font-medium px-2 py-1 rounded-md border ${styles[priority] ?? styles.Low}`
+  }
 
   const getStatusDot = (status) => {
     const colors = {
       'In Progress': 'bg-blue-500',
-      'Pending': 'bg-orange-500',
-      'Scheduled': 'bg-slate-300'
-    };
-    return <span className={`w-2 h-2 rounded-full mr-2 ${colors[status] || 'bg-slate-300'}`}></span>;
-  };
+      Pending:       'bg-orange-500',
+      Scheduled:     'bg-slate-300',
+    }
+    return <span className={`w-2 h-2 rounded-full mr-2 shrink-0 ${colors[status] ?? 'bg-slate-300'}`} />
+  }
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 h-full flex flex-col overflow-hidden">
+      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+
       <div className="p-6 border-b border-slate-100 flex justify-between items-center">
         <h2 className="text-lg font-bold text-slate-800">Recent Work Orders</h2>
-        <button className="text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors">
+        <button
+          onClick={() => onNavigate('workorders')}
+          className="text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
+        >
           View All
         </button>
       </div>
@@ -41,11 +50,11 @@ export default function WorkOrders() {
             </tr>
           </thead>
           <tbody className="text-sm divide-y divide-slate-100">
-            {workOrdersData.map((order) => (
+            {workOrdersData.map(order => (
               <tr key={order.id} className="hover:bg-slate-50 transition-colors">
                 <td className="p-4">
                   <div className="font-semibold text-slate-800">{order.task}</div>
-                  <div className="text-xs text-slate-400 mt-0.5">{order.id} • Due {order.dueDate}</div>
+                  <div className="text-xs text-slate-400 mt-0.5">{order.id} · Due {order.dueDate}</div>
                 </td>
                 <td className="p-4 hidden sm:table-cell">
                   <span className="text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md text-xs font-medium">
@@ -62,7 +71,10 @@ export default function WorkOrders() {
                   </div>
                 </td>
                 <td className="p-4 text-right">
-                  <button className="text-slate-400 hover:text-slate-600 p-1 rounded transition-colors">
+                  <button
+                    onClick={() => setToast(`${order.id} options: Reassign · Mark Complete`)}
+                    className="text-slate-400 hover:text-slate-600 p-1 rounded transition-colors"
+                  >
                     <MoreHorizontal className="w-5 h-5" />
                   </button>
                 </td>
@@ -72,5 +84,5 @@ export default function WorkOrders() {
         </table>
       </div>
     </div>
-  );
+  )
 }
