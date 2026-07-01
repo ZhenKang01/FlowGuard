@@ -1,27 +1,40 @@
-import { useState } from 'react'
-import { workOrdersData } from '../../data/mockData'
-import { FileText, MoreHorizontal } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { MoreHorizontal } from 'lucide-react'
 import Toast from '../ui/Toast'
+import { fetchWorkOrders, updateWorkOrderStatus } from '../../lib/supabaseQueries'
+
+function getPriorityBadge(severity) {
+  const styles = {
+    High:   'bg-red-50 text-red-700 border-red-100',
+    Medium: 'bg-orange-50 text-orange-700 border-orange-100',
+    Low:    'bg-slate-50 text-slate-700 border-slate-200',
+  }
+  return `text-xs font-medium px-2 py-1 rounded-md border ${styles[severity] ?? styles.Low}`
+}
+
+function getStatusDot(status) {
+  const colors = {
+    'Open':        'bg-orange-500',
+    'In Progress': 'bg-blue-500',
+    'Resolved':    'bg-emerald-500',
+    'Closed':      'bg-slate-300',
+  }
+  return <span className={`w-2 h-2 rounded-full mr-2 shrink-0 inline-block ${colors[status] ?? 'bg-slate-300'}`} />
+}
 
 export default function WorkOrders({ onNavigate }) {
-  const [toast, setToast] = useState(null)
+  const [orders, setOrders] = useState([])
+  const [toast,  setToast]  = useState(null)
 
-  const getPriorityBadge = (priority) => {
-    const styles = {
-      High:   'bg-red-50 text-red-700 border-red-100',
-      Medium: 'bg-orange-50 text-orange-700 border-orange-100',
-      Low:    'bg-slate-50 text-slate-700 border-slate-200',
-    }
-    return `text-xs font-medium px-2 py-1 rounded-md border ${styles[priority] ?? styles.Low}`
-  }
+  useEffect(() => {
+    fetchWorkOrders({ limit: 5 }).then(({ data }) => setOrders(data ?? []))
+  }, [])
 
-  const getStatusDot = (status) => {
-    const colors = {
-      'In Progress': 'bg-blue-500',
-      Pending:       'bg-orange-500',
-      Scheduled:     'bg-slate-300',
-    }
-    return <span className={`w-2 h-2 rounded-full mr-2 shrink-0 ${colors[status] ?? 'bg-slate-300'}`} />
+  const handleMarkComplete = async (order) => {
+    const { error } = await updateWorkOrderStatus(order.id, 'Resolved')
+    if (error) { setToast(`Error: ${error.message}`); return }
+    setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'Resolved' } : o))
+    setToast(`${order.issue_type} marked as resolved`)
   }
 
   return (
@@ -39,49 +52,49 @@ export default function WorkOrders({ onNavigate }) {
       </div>
 
       <div className="flex-1 overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
-              <th className="p-4 font-medium">Task</th>
-              <th className="p-4 font-medium hidden sm:table-cell">Assigned</th>
-              <th className="p-4 font-medium">Priority</th>
-              <th className="p-4 font-medium">Status</th>
-              <th className="p-4 font-medium text-right"></th>
-            </tr>
-          </thead>
-          <tbody className="text-sm divide-y divide-slate-100">
-            {workOrdersData.map(order => (
-              <tr key={order.id} className="hover:bg-slate-50 transition-colors">
-                <td className="p-4">
-                  <div className="font-semibold text-slate-800">{order.task}</div>
-                  <div className="text-xs text-slate-400 mt-0.5">{order.id} · Due {order.dueDate}</div>
-                </td>
-                <td className="p-4 hidden sm:table-cell">
-                  <span className="text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md text-xs font-medium">
-                    {order.team}
-                  </span>
-                </td>
-                <td className="p-4">
-                  <span className={getPriorityBadge(order.priority)}>{order.priority}</span>
-                </td>
-                <td className="p-4">
-                  <div className="flex items-center text-slate-600 whitespace-nowrap">
-                    {getStatusDot(order.status)}
-                    {order.status}
-                  </div>
-                </td>
-                <td className="p-4 text-right">
-                  <button
-                    onClick={() => setToast(`${order.id} options: Reassign · Mark Complete`)}
-                    className="text-slate-400 hover:text-slate-600 p-1 rounded transition-colors"
-                  >
-                    <MoreHorizontal className="w-5 h-5" />
-                  </button>
-                </td>
+        {orders.length === 0 ? (
+          <p className="text-sm text-slate-400 text-center py-8">No work orders yet</p>
+        ) : (
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+                <th className="p-4 font-medium">Task</th>
+                <th className="p-4 font-medium">Severity</th>
+                <th className="p-4 font-medium">Status</th>
+                <th className="p-4 font-medium text-right"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="text-sm divide-y divide-slate-100">
+              {orders.map(order => (
+                <tr key={order.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="p-4">
+                    <div className="font-semibold text-slate-800">{order.issue_type}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">{order.location}</div>
+                  </td>
+                  <td className="p-4">
+                    <span className={getPriorityBadge(order.severity)}>{order.severity}</span>
+                  </td>
+                  <td className="p-4">
+                    <div className="flex items-center text-slate-600 whitespace-nowrap">
+                      {getStatusDot(order.status)}
+                      {order.status}
+                    </div>
+                  </td>
+                  <td className="p-4 text-right">
+                    <button
+                      onClick={() => handleMarkComplete(order)}
+                      disabled={order.status === 'Resolved' || order.status === 'Closed'}
+                      className="text-slate-400 hover:text-slate-600 disabled:opacity-30 p-1 rounded transition-colors"
+                      title="Mark complete"
+                    >
+                      <MoreHorizontal className="w-5 h-5" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   )

@@ -37,8 +37,8 @@ Usage
     # curl tests:
     curl http://localhost:8000/health
     curl http://localhost:8000/alerts
-    curl -X POST http://localhost:8000/score \\
-         -H "Content-Type: application/json" \\
+    curl -X POST http://localhost:8000/score \
+         -H "Content-Type: application/json" \
          -d '{"meter_id":"meter_02","readings":[350,380,400,420,410,390,400,415,408,395,420,435,410,400,390,405,415,425,410,400,395,385,375,360]}'
 """
 
@@ -48,6 +48,7 @@ import logging
 import os
 import sys
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,16 +69,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 # ── Environment ───────────────────────────────────────────────────────────────
 
-# Set via shell: export N8N_WEBHOOK_URL=http://localhost:5678/webhook/flowguard-anomaly
 N8N_WEBHOOK_URL: str = os.getenv(
     "N8N_WEBHOOK_URL",
     "http://localhost:5678/webhook/flowguard-anomaly",
 )
+SUPABASE_URL: str             = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 # ── In-memory alert store ─────────────────────────────────────────────────────
 # Stores alerts POSTed back by n8n after routing.  Survives only for the
 # lifetime of the process — a real deployment would use a database.
-_alerts: list[dict] = []
+alerts_store = deque(maxlen=50)
 
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
@@ -127,17 +129,14 @@ class MetersResponse(BaseModel):
 
 
 class AlertCreate(BaseModel):
-    """Body for POST /alerts — typically sent by n8n after routing."""
-    meter_id:       str
-    score:          float
-    threshold:      float
-    severity:       str   = Field(description="low | medium | high")
-    timestamp:      str
-    status:         str   = Field(default="active")
-    recommendation: str   = Field(default="")
-    # Fields added for the n8n workflow (workflow sets these explicitly)
-    needs_approval: bool  = Field(default=False, description="True → human must approve before action")
-    message:        str   = Field(default="", description="Human-readable alert summary from n8n")
+    meter_id: str
+    score: float
+    threshold: float
+    severity: str
+    needs_approval: bool
+    message: str
+    recommended_action: str
+    timestamp: str
 
 
 # ── App lifecycle ─────────────────────────────────────────────────────────────
@@ -210,7 +209,53 @@ def _severity(score: float, threshold: float) -> str:
     return "low"
 
 
-def _notify_n8n(payload: dict) -> None:
+def _persist_alert(alert: dict) -> None:
+    """Write alert row to Supabase. Non-fatal — errors are logged only."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        logger.warning("Supabase not configured — alert not persisted to DB")
+        return
+    try:
+        # verify=False: Windows dev environment has SSL inspection that breaks cert chains.
+        # Production deployments on Linux/cloud do not need this.
+        with httpx.Client(timeout=5.0, verify=False) as client:
+            r = client.post(
+                f"{SUPABASE_URL}/rest/v1/alerts",
+                json=alert,
+                headers={
+                    "apikey":        SUPABASE_SERVICE_ROLE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+                    "Content-Type":  "application/json",
+                    "Prefer":        "return=minimal",
+                },
+            )
+            r.raise_for_status()
+            logger.info("Alert persisted to Supabase: id=%s", alert.get("id"))
+    except Exception as exc:
+        logger.warning("Supabase alert persist failed (non-fatal): %s", exc)
+
+
+def _update_alert_status(alert_id: str, status: str) -> None:
+    """Patch alert status in Supabase. Non-fatal."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return
+    try:
+        with httpx.Client(timeout=5.0, verify=False) as client:
+            r = client.patch(
+                f"{SUPABASE_URL}/rest/v1/alerts?id=eq.{alert_id}",
+                json={"status": status, "updated_at": datetime.now(timezone.utc).isoformat()},
+                headers={
+                    "apikey":        SUPABASE_SERVICE_ROLE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+                    "Content-Type":  "application/json",
+                    "Prefer":        "return=minimal",
+                },
+            )
+            r.raise_for_status()
+    except Exception as exc:
+        logger.warning("Supabase alert status update failed (non-fatal): %s", exc)
+
+
+async def _notify_n8n(payload: dict) -> None:
     """POST anomaly payload to n8n webhook — runs in a background thread.
 
     Non-blocking and fault-tolerant: a timeout, connection error, or any other
@@ -219,8 +264,8 @@ def _notify_n8n(payload: dict) -> None:
     dashboard.
     """
     try:
-        with httpx.Client(timeout=5.0) as client:
-            r = client.post(N8N_WEBHOOK_URL, json=payload)
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(N8N_WEBHOOK_URL, json=payload)
             r.raise_for_status()
             logger.info("n8n notified for %s (severity=%s)", payload["meter_id"], payload["severity"])
     except Exception as exc:
@@ -281,21 +326,14 @@ def meters() -> MetersResponse:
     status_code=201,
 )
 def create_alert(body: AlertCreate) -> dict:
-    """n8n POSTs here after deciding severity and appending its recommendation."""
-    alert = {
-        "id":             str(uuid.uuid4()),
-        **body.model_dump(),
-    }
-    _alerts.append(alert)
-    logger.info("Alert stored: id=%s meter=%s severity=%s", alert["id"], alert["meter_id"], alert["severity"])
-    return alert
+    alerts_store.appendleft(body.model_dump())
+    return {"status": "received"}
 
 
 # ── GET /alerts ───────────────────────────────────────────────────────────────
 @app.get("/alerts", summary="Return recent alerts")
-def get_alerts() -> dict:
-    """Returns the last 50 alerts (most recent last).  Dashboard polls this."""
-    return {"alerts": _alerts[-50:]}
+def get_alerts() -> list[dict]:
+    return list(alerts_store)
 
 
 # ── PATCH /alerts/{alert_id}/approve ─────────────────────────────────────────
@@ -303,12 +341,13 @@ def get_alerts() -> dict:
     "/alerts/{alert_id}/approve",
     summary="Approve a pending_approval alert (human-in-the-loop)",
 )
-def approve_alert(alert_id: str) -> dict:
+def approve_alert(alert_id: str, background_tasks: BackgroundTasks) -> dict:
     """Set status to 'approved'.  Returns the updated alert or 404."""
-    for alert in _alerts:
-        if alert["id"] == alert_id:
+    for alert in alerts_store:
+        if alert.get("id") == alert_id:
             alert["status"] = "approved"
-            logger.info("Alert approved: id=%s meter=%s", alert_id, alert["meter_id"])
+            background_tasks.add_task(_update_alert_status, alert_id, "approved")
+            logger.info("Alert approved: id=%s meter=%s", alert_id, alert.get("meter_id"))
             return alert
     raise HTTPException(status_code=404, detail=f"Alert {alert_id!r} not found.")
 
@@ -360,7 +399,7 @@ def chat(req: ChatRequest) -> ChatResponse:
         message=req.message,
         user_role=req.user_role,
         conversation_history=history,
-        current_alerts=_alerts[-20:],
+        current_alerts=list(alerts_store)[:20],
         scorer=_scorer,
     )
     return ChatResponse(**result)

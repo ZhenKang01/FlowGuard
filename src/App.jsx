@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useDashboardKPIs } from './hooks/useDashboardKPIs'
 import Sidebar from './components/layout/Sidebar'
 import Header from './components/layout/Header'
 import ChatWidget from './components/chat/ChatWidget'
@@ -19,9 +20,10 @@ import SettingsPage from './pages/SettingsPage'
 import UserManagementPage from './pages/UserManagementPage'
 
 function Dashboard({ onNavigate }) {
+  const { openAlerts, openWorkOrders } = useDashboardKPIs()
   return (
     <div className="space-y-6">
-      <KPICards />
+      <KPICards openAlerts={openAlerts} openWorkOrders={openWorkOrders} />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2"><WaterAnalytics /></div>
         <div className="lg:col-span-1"><AlertsPanel onNavigate={onNavigate} /></div>
