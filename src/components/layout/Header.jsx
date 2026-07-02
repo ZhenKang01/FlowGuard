@@ -22,7 +22,6 @@ function useClickOutside(ref, handler) {
 }
 
 export default function Header({ onMenuClick, activePage, onNavigate }) {
-  const [searchQuery, setSearchQuery]         = useState('')
   const [buildingOpen, setBuildingOpen]       = useState(false)
   const [selectedBuilding, setSelectedBuilding] = useState('All Buildings')
   const [notifOpen, setNotifOpen]             = useState(false)
@@ -54,26 +53,6 @@ export default function Header({ onMenuClick, activePage, onNavigate }) {
       </div>
 
       <div className="flex items-center space-x-3 lg:space-x-4">
-
-        {/* Search */}
-        <div className="relative hidden md:block">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search..."
-            className="w-56 pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
 
         {/* Building filter */}
         <div ref={buildingRef} className="relative hidden sm:block">
