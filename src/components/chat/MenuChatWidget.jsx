@@ -10,7 +10,6 @@ const chatbotMenus = {
       "Account / Login Issues",
       "Dashboard Help",
       "Report a Problem",
-      "Billing / Subscription",
       "Contact Customer Service"
     ]
   },
@@ -41,16 +40,6 @@ const chatbotMenus = {
       "Sensor issue",
       "Sanitation supply issue",
       "Maintenance request",
-      "Email support",
-      "Back to Main Menu"
-    ]
-  },
-  "Billing / Subscription": {
-    message: "What billing issue do you need help with?",
-    options: [
-      "Payment plan",
-      "Payment issue",
-      "Upgrade plan",
       "Email support",
       "Back to Main Menu"
     ]
