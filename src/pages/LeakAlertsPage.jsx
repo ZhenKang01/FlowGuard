@@ -8,7 +8,10 @@ export default function LeakAlertsPage() {
   useEffect(() => {
     const fetchAlerts = async () => {
       try {
-        const res = await fetch('http://localhost:8000/alerts')
+        const API_URL = import.meta.env.VITE_AI_API_URL 
+          ? import.meta.env.VITE_AI_API_URL.replace('/predict', '/alerts')
+          : 'https://flowguard-backend-w8ig.onrender.com/alerts';
+        const res = await fetch(API_URL)
         if (!res.ok) throw new Error('API Error')
         const data = await res.json()
         setAlerts(data)

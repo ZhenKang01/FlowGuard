@@ -12,7 +12,7 @@
  * API is down.
  */
 
-const BASE = (import.meta.env.VITE_FLOWGUARD_API_URL ?? 'http://localhost:8000')
+const BASE = (import.meta.env.VITE_FLOWGUARD_API_URL ?? 'https://flowguard-backend-w8ig.onrender.com')
   .replace(/\/$/, '')
 
 async function request(path, options = {}) {
