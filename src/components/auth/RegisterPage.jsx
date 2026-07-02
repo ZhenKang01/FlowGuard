@@ -27,7 +27,7 @@ function Spinner() {
 }
 
 export default function RegisterPage({ onSwitchToLogin }) {
-  const { signUp } = useAuth()
+  const { signUp, verifyOtp } = useAuth()
   const [fullName, setFullName]   = useState('')
   const [email, setEmail]         = useState('')
   const [password, setPassword]   = useState('')
@@ -37,6 +37,8 @@ export default function RegisterPage({ onSwitchToLogin }) {
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState(null)
   const [pendingEmail, setPendingEmail] = useState(null)
+  const [otp, setOtp]             = useState('')
+  const [otpLoading, setOtpLoading] = useState(false)
 
   const strength       = getPasswordStrength(password)
   const mismatch       = confirm.length > 0 && password !== confirm
@@ -65,27 +67,73 @@ export default function RegisterPage({ onSwitchToLogin }) {
   }
 
   // ── Email confirmation pending ────────────────────────────────────────────
+  async function handleVerifyOtp(e) {
+    e.preventDefault()
+    if (!otp) return setError('Please enter the OTP.')
+    
+    setError(null)
+    setOtpLoading(true)
+    try {
+      await verifyOtp(pendingEmail, otp.trim())
+      // Successful verification automatically updates the AuthContext session
+      // which will unmount this page and show the Dashboard.
+    } catch (err) {
+      setError(err.message ?? 'Verification failed. Please try again.')
+    } finally {
+      setOtpLoading(false)
+    }
+  }
+
   if (pendingEmail) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
         <div className="w-full max-w-md text-center">
-          <div className="w-16 h-16 bg-emerald-500/15 rounded-full flex items-center justify-center mx-auto mb-6 ring-1 ring-emerald-500/25">
-            <CheckCircle className="w-8 h-8 text-emerald-400" />
+          <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl p-8">
+            <div className="w-16 h-16 bg-blue-500/15 rounded-full flex items-center justify-center mx-auto mb-6 ring-1 ring-blue-500/25">
+              <Mail className="w-8 h-8 text-blue-400" />
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">Check your email</h2>
+            <p className="text-slate-400 text-sm leading-relaxed mb-2">
+              We sent a 6-digit confirmation code to
+            </p>
+            <p className="text-white font-medium mb-6">{pendingEmail}</p>
+
+            {error && (
+              <div className="mb-5 flex items-start gap-3 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-left">
+                <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+                <p className="text-red-400 text-sm">{error}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyOtp} className="space-y-4">
+              <div>
+                <input
+                  type="text"
+                  required
+                  value={otp}
+                  onChange={e => setOtp(e.target.value)}
+                  placeholder="Enter 6-digit OTP"
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-center tracking-widest text-lg font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={otpLoading || !otp}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
+              >
+                {otpLoading ? <><Spinner /> Verifying…</> : 'Verify Account'}
+              </button>
+            </form>
+            
+            <div className="mt-6">
+              <button
+                onClick={onSwitchToLogin}
+                className="text-slate-500 hover:text-slate-400 text-sm font-medium transition-colors"
+              >
+                Back to sign in
+              </button>
+            </div>
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2">Check your email</h2>
-          <p className="text-slate-400 text-sm leading-relaxed mb-2">
-            A confirmation link was sent to
-          </p>
-          <p className="text-white font-medium mb-6">{pendingEmail}</p>
-          <p className="text-slate-500 text-xs mb-8">
-            Click the link in the email to activate your account. You can close this tab.
-          </p>
-          <button
-            onClick={onSwitchToLogin}
-            className="text-blue-400 hover:text-blue-300 text-sm font-medium transition-colors"
-          >
-            Back to sign in
-          </button>
         </div>
       </div>
     )

@@ -91,6 +91,38 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut()
   }
 
+  async function verifyOtp(email, token) {
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: 'signup'
+    })
+    if (error) throw error
+    return data
+  }
+
+  async function resetPasswordForEmail(email) {
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email)
+    if (error) throw error
+    return data
+  }
+
+  async function verifyPasswordResetOtp(email, token) {
+    const { data, error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: 'recovery'
+    })
+    if (error) throw error
+    return data
+  }
+
+  async function updatePassword(newPassword) {
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword })
+    if (error) throw error
+    return data
+  }
+
   // Role resolution: profiles table → app_metadata → user_metadata → viewer
   const role =
     profile?.role ??
@@ -99,7 +131,11 @@ export function AuthProvider({ children }) {
     'viewer'
 
   return (
-    <AuthContext.Provider value={{ user, profile, role, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ 
+      user, profile, role, loading, 
+      signIn, signUp, signOut, verifyOtp,
+      resetPasswordForEmail, verifyPasswordResetOtp, updatePassword 
+    }}>
       {children}
     </AuthContext.Provider>
   )

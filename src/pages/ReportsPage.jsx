@@ -23,9 +23,47 @@ export default function ReportsPage() {
   const handleDownload = (report) => {
     setDownloading(report.id)
     setTimeout(() => {
+      const csvContent = "Date,Metric,Value\\n" + 
+        "2026-01-01,Water Usage,1200\\n" + 
+        "2026-01-02,Water Usage,1150\\n" + 
+        "2026-01-03,Water Usage,1300\\n" +
+        "2026-01-04,Water Usage,1250\\n";
+      
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${report.title.replace(/\\s+/g, '_')}_${report.period.replace(/\\s+/g, '_')}.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+
       setDownloading(null)
       setToast(`${report.title} (${report.period}) downloaded`)
-    }, 1000)
+    }, 800)
+  }
+
+  const handleGenerateReport = () => {
+    setToast('Generating new report — this may take a moment')
+    setTimeout(() => {
+      const csvContent = "Date,Metric,Value,Status\\n" + 
+        "2026-06-01,Total Consumption,45000,Normal\\n" + 
+        "2026-06-15,Leak Incident,500,Resolved\\n" + 
+        "2026-06-30,Compliance,100%,Passed\\n";
+      
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `Generated_Facility_Report_${new Date().toISOString().split('T')[0]}.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    }, 1500)
   }
 
   return (
@@ -38,7 +76,7 @@ export default function ReportsPage() {
           <p className="text-slate-500 mt-1">Download and manage facility reports</p>
         </div>
         <button
-          onClick={() => setToast('Generating new report — this may take a moment')}
+          onClick={handleGenerateReport}
           className="flex items-center space-x-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-colors"
         >
           <FileBarChart className="w-4 h-4" />

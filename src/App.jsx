@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useDashboardKPIs } from './hooks/useDashboardKPIs'
 import Sidebar from './components/layout/Sidebar'
 import Header from './components/layout/Header'
-import ChatWidget from './components/chat/ChatWidget'
+import MenuChatWidget from './components/chat/MenuChatWidget'
 import KPICards from './components/dashboard/KPICards'
 import WaterAnalytics from './components/dashboard/WaterAnalytics'
 import AlertsPanel from './components/dashboard/AlertsPanel'
@@ -19,6 +19,7 @@ import WorkOrdersPage from './pages/WorkOrdersPage'
 import ReportsPage from './pages/ReportsPage'
 import SettingsPage from './pages/SettingsPage'
 import UserManagementPage from './pages/UserManagementPage'
+import ProfilePage from './pages/ProfilePage'
 
 function Dashboard({ onNavigate }) {
   const { openAlerts, openWorkOrders } = useDashboardKPIs()
@@ -52,6 +53,7 @@ const PAGE_MAP = {
   reports:    ReportsPage,
   settings:   SettingsPage,
   users:      UserManagementPage,
+  profile:    ProfilePage,
 }
 
 export default function App() {
@@ -95,7 +97,7 @@ export default function App() {
       </div>
 
       {/* Chat widget — fixed position, renders above all page content */}
-      <ChatWidget />
+      <MenuChatWidget />
     </div>
   )
 }

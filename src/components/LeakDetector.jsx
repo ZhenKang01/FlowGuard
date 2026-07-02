@@ -17,25 +17,33 @@ export default function LeakDetector() {
     setResult(null);
 
     try {
-      const response = await fetch('http://localhost:8000/predict', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          hour: parseInt(hour, 10),
-          flow_rate: parseFloat(flowRate)
-        })
-      });
+      // Prioritize Vite env variable, fallback to Next.js style if migrated later, then localhost
+      const API_URL = import.meta.env.VITE_AI_API_URL || import.meta.env.NEXT_PUBLIC_AI_API_URL || 'http://localhost:8000/predict';
+      
+      let response;
+      try {
+        response = await fetch(API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            hour: parseInt(hour, 10),
+            flow_rate: parseFloat(flowRate)
+          })
+        });
+      } catch (networkError) {
+        throw new Error("Network/CORS error: Could not connect to the public API server.");
+      }
 
       if (!response.ok) {
-        throw new Error('API error');
+        throw new Error(`Server error (${response.status}): The backend encountered an issue processing the request.`);
       }
 
       const data = await response.json();
       setResult(data);
     } catch (err) {
-      setError("Connection to PyTorch API failed. Please ensure the machine learning server is active on port 8000.");
+      setError(err.message || "Connection to PyTorch API failed.");
     } finally {
       setLoading(false);
     }

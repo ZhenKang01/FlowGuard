@@ -76,18 +76,24 @@ export default function Sidebar({ activePage, onNavigate }) {
       </nav>
 
       <div className="p-4 border-t border-slate-800 bg-slate-950/30 shrink-0">
-        <div className="flex items-center px-3 py-3 rounded-xl">
-          <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm shrink-0 select-none">
+        <div 
+          onClick={() => onNavigate('profile')}
+          className="flex items-center px-3 py-3 rounded-xl hover:bg-slate-800/80 cursor-pointer transition-colors group"
+        >
+          <div className="w-9 h-9 rounded-full bg-blue-600 group-hover:bg-blue-500 flex items-center justify-center text-white font-bold text-sm shrink-0 select-none transition-colors">
             {initials}
           </div>
-          <div className="ml-3 flex-1 overflow-hidden">
+          <div className="ml-3 flex-1 overflow-hidden text-left">
             <p className="text-sm font-medium text-white truncate">{displayName}</p>
             <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded-md mt-0.5 ${roleBadge}`}>
               {roleLabel}
             </span>
           </div>
           <button
-            onClick={signOut}
+            onClick={(e) => {
+              e.stopPropagation();
+              signOut();
+            }}
             title="Sign out"
             className="ml-2 p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors shrink-0"
           >
