@@ -17,8 +17,8 @@ export default function LeakDetector() {
     setResult(null);
 
     try {
-      // Prioritize Vite env variable, fallback to Next.js style if migrated later, then localhost
-      const API_URL = import.meta.env.VITE_AI_API_URL || import.meta.env.NEXT_PUBLIC_AI_API_URL || 'http://localhost:8000/predict';
+      // Prioritize Vite env variable, fallback to Next.js style if migrated later, then production Render backend
+      const API_URL = import.meta.env.VITE_AI_API_URL || import.meta.env.NEXT_PUBLIC_AI_API_URL || 'https://flowguard-backend-w8ig.onrender.com/predict';
       
       let response;
       try {
