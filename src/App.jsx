@@ -10,6 +10,7 @@ import SuppliesStatus from './components/dashboard/SuppliesStatus'
 import WorkOrders from './components/dashboard/WorkOrders'
 import FacilityMap from './components/dashboard/FacilityMap'
 import ReportsPreview from './components/dashboard/ReportsPreview'
+import LeakDetector from './components/LeakDetector'
 
 import WaterMonitoringPage from './pages/WaterMonitoringPage'
 import LeakAlertsPage from './pages/LeakAlertsPage'
@@ -35,6 +36,9 @@ function Dashboard({ onNavigate }) {
         </div>
         <div className="lg:col-span-1"><FacilityMap /></div>
         <div className="lg:col-span-1"><WorkOrders onNavigate={onNavigate} /></div>
+      </div>
+      <div className="grid grid-cols-1 gap-6">
+        <LeakDetector />
       </div>
     </div>
   )

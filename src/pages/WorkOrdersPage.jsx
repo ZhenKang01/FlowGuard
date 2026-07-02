@@ -27,7 +27,7 @@ function StatusDot({ status }) {
   return <span className={`inline-block w-2 h-2 rounded-full mr-2 shrink-0 ${colors[status] ?? 'bg-slate-300'}`} />
 }
 
-function ContextMenu({ order, onClose, onAction }) {
+function ContextMenu({ order, onClose, onAction, isAdmin }) {
   const ref = useRef(null)
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }
@@ -35,14 +35,18 @@ function ContextMenu({ order, onClose, onAction }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose])
 
+  const actions = ['View Details', 'Mark Complete']
+  if (isAdmin) actions.push('Delete Order')
+  actions.push('Cancel')
+
   return (
     <div ref={ref} className="absolute right-10 top-0 z-10 bg-white rounded-xl shadow-xl border border-slate-100 py-1 w-44">
-      {['View Details', 'Mark Complete', 'Cancel'].map(action => (
+      {actions.map(action => (
         <button
           key={action}
           onClick={() => { onAction(action, order); onClose() }}
           className={`w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 transition-colors ${
-            action === 'Cancel' ? 'text-red-500' : 'text-slate-700'
+            action === 'Cancel' || action === 'Delete Order' ? 'text-red-500' : 'text-slate-700'
           }`}
         >
           {action}
@@ -56,6 +60,7 @@ const EMPTY_FORM = { location: '', issue_type: '', severity: 'Medium', descripti
 
 export default function WorkOrdersPage() {
   const { role } = useAuth()
+  const isAdmin = role === 'admin'
   const [activeTab,     setActiveTab]     = useState('All')
   const [orders,        setOrders]        = useState([])
   const [loading,       setLoading]       = useState(true)
@@ -104,6 +109,12 @@ export default function WorkOrdersPage() {
       if (error) { setToast(`Error: ${error.message}`); return }
       setToast('Work order marked as resolved')
     }
+    if (action === 'Delete Order') {
+      const { error } = await supabase.from('work_orders').delete().eq('id', order.id)
+      if (error) { setToast(`Error: ${error.message}`); return }
+      setToast('Work order deleted')
+      reload()
+    }
   }
 
   const handleSubmit = async (e) => {
@@ -138,13 +149,25 @@ export default function WorkOrdersPage() {
           <h1 className="text-2xl font-bold text-slate-800">Work Orders</h1>
           <p className="text-slate-500 mt-1">Track and manage all maintenance tasks</p>
         </div>
-        <button
-          onClick={() => setShowNew(true)}
-          className="flex items-center space-x-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Work Order</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          {isAdmin && (
+            <button
+              onClick={() => setToast('Viewing all facility logs (Not implemented)')}
+              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl shadow-sm transition-colors"
+            >
+              View All Logs
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => setShowNew(true)}
+              className="flex items-center space-x-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span>New Work Order</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100">
@@ -210,7 +233,7 @@ export default function WorkOrdersPage() {
                         <MoreHorizontal className="w-5 h-5" />
                       </button>
                       {openMenu === order.id && (
-                        <ContextMenu order={order} onClose={() => setOpenMenu(null)} onAction={handleMenuAction} />
+                        <ContextMenu order={order} onClose={() => setOpenMenu(null)} onAction={handleMenuAction} isAdmin={isAdmin} />
                       )}
                     </td>
                   </tr>
