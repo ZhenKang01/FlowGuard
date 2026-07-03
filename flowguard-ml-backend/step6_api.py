@@ -1,3 +1,4 @@
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
 from pydantic import BaseModel
 import torch
@@ -26,11 +27,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Note: Change to your Vercel URL in production
+    allow_origins=["https://flowguard-jet.vercel.app", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 model = FlowGuardAnomalyDetector()
 model.load_state_dict(torch.load('flowguard_model.pth'))
 model.eval() # Lock the model into evaluation mode (no more training)
