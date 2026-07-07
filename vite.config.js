@@ -8,4 +8,14 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  server: {
+    proxy: {
+      '/chat-api': {
+        target: 'https://n8ngc.codeblazar.org',
+        changeOrigin: true,
+        secure: false, // Bypasses SSL certificate issues
+        rewrite: (path) => path.replace(/^\/chat-api/, '')
+      }
+    }
+  }
 })

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useDashboardKPIs } from './hooks/useDashboardKPIs'
 import Sidebar from './components/layout/Sidebar'
 import Header from './components/layout/Header'
-import MenuChatWidget from './components/chat/MenuChatWidget'
+import ChatWidget from './components/chat/ChatWidget'
 import KPICards from './components/dashboard/KPICards'
 import WaterAnalytics from './components/dashboard/WaterAnalytics'
 import AlertsPanel from './components/dashboard/AlertsPanel'
@@ -97,7 +97,7 @@ export default function App() {
       </div>
 
       {/* Chat widget — fixed position, renders above all page content */}
-      <MenuChatWidget />
+      <ChatWidget />
     </div>
   )
 }

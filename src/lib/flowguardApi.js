@@ -64,14 +64,28 @@ export function approveAlert(alertId) {
  * @param {Array}  conversationHistory  [{role, content}, ...]
  * @returns {{ reply: string, intent: string, confidence: number }}
  */
-export function sendChatMessage(message, userRole, conversationHistory) {
-  return request('/chat', {
+export async function sendChatMessage(message, userRole, conversationHistory) {
+  // Use the local proxy to bypass CORS and SSL certificate errors
+  const res = await fetch('/chat-api/webhook/c32956ef-f1e9-4cd8-a2e3-35ea76acae9a/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      message,
+      chatInput: message,          // n8n AI node typically expects chatInput
+      sessionId: "user-session-1", // n8n AI node typically expects sessionId for memory
+      message: message,            // Original fields just in case
       user_role: userRole,
       conversation_history: conversationHistory,
     }),
-  })
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message || body.detail || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  
+  // n8n AI response is usually in `data.output`. Fallback to `reply` or the raw string.
+  return { 
+    reply: data.output || data.reply || (typeof data === 'string' ? data : JSON.stringify(data)),
+    intent: data.intent || 'smalltalk'
+  };
 }
