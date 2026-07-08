@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlowGuard - Pipe Anomaly Scanner</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            flowguard: {
+              bg: '#0f172a',
+              card: '#1e293b',
+              border: '#334155',
+              accent: '#3b82f6',
+              accentHover: '#2563eb'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+  </style>
+</head>
+<body class="bg-flowguard-bg text-slate-200 min-h-screen flex items-center justify-center p-4">
+
+  <div class="bg-flowguard-card border border-flowguard-border rounded-2xl p-8 w-full max-w-md shadow-2xl">
+    
+    <div class="flex items-center justify-center mb-6">
+      <div class="bg-flowguard-accent/20 p-3 rounded-full mr-3">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-flowguard-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+        </svg>
+      </div>
+      <h1 class="text-2xl font-bold text-white tracking-wide">FlowGuard Scan</h1>
+    </div>
+    
+    <p class="text-sm text-slate-400 mb-6 text-center">
+      Upload a photo of a pipe to instantly classify anomalies.
+    </p>
+
+    <form id="uploadForm" class="space-y-5">
+      
+      <!-- File Input -->
+      <div>
+        <label for="fileInput" class="block text-sm font-medium text-slate-300 mb-2">Select Pipe Image</label>
+        <input 
+          type="file" 
+          id="fileInput" 
+          accept="image/*" 
+          required
+          class="block w-full text-sm text-slate-300
+                 file:mr-4 file:py-2.5 file:px-4
+                 file:rounded-xl file:border-0
+                 file:text-sm file:font-semibold
+                 file:bg-slate-700 file:text-white
+                 hover:file:bg-slate-600
+                 cursor-pointer border border-flowguard-border rounded-xl bg-slate-800/50"
+        />
+      </div>
+
+      <!-- Image Preview -->
+      <div id="previewContainer" class="hidden rounded-xl overflow-hidden border border-flowguard-border h-48 bg-slate-800 flex items-center justify-center">
+        <img id="imagePreview" src="#" alt="Preview" class="max-h-full max-w-full object-contain" />
+      </div>
+
+      <!-- Submit Button -->
+      <button 
+        type="submit" 
+        id="submitBtn"
+        class="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-bold text-white bg-flowguard-accent hover:bg-flowguard-accentHover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-flowguard-card focus:ring-flowguard-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <span id="btnText">Scan Pipe</span>
+        <svg id="loadingSpinner" class="hidden animate-spin ml-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      </button>
+
+    </form>
+
+    <!-- Response Box -->
+    <div id="responseBox" class="mt-6 hidden rounded-xl p-4 border text-sm font-medium transition-all duration-300">
+      <div class="flex items-start">
+        <div id="responseIcon" class="mr-3 mt-0.5 shrink-0"></div>
+        <p id="responseText" class="leading-relaxed"></p>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // Configuration
+    const N8N_WEBHOOK_URL = "https://n8ngc.codeblazar.org/webhook/roboflow-upload";
+
+    // DOM Elements
+    const form = document.getElementById('uploadForm');
+    const fileInput = document.getElementById('fileInput');
+    const submitBtn = document.getElementById('submitBtn');
+    const btnText = document.getElementById('btnText');
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    const responseBox = document.getElementById('responseBox');
+    const responseText = document.getElementById('responseText');
+    const responseIcon = document.getElementById('responseIcon');
+    const previewContainer = document.getElementById('previewContainer');
+    const imagePreview = document.getElementById('imagePreview');
+
+    // SVG Icons
+    const ICONS = {
+      error: `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>`,
+      success: `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`,
+      critical: `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`
+    };
+
+    // Image Preview Handler
+    fileInput.addEventListener('change', function() {
+      const file = this.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          imagePreview.src = e.target.result;
+          previewContainer.classList.remove('hidden');
+        }
+        reader.readAsDataURL(file);
+      } else {
+        previewContainer.classList.add('hidden');
+        imagePreview.src = '#';
+      }
+      
+      // Hide response box when new file selected
+      responseBox.classList.add('hidden');
+    });
+
+    // Display Response Helper
+    function showResponse(status, message) {
+      responseBox.classList.remove('hidden', 'bg-red-500/10', 'border-red-500/30', 'text-red-400', 
+                                            'bg-green-500/10', 'border-green-500/30', 'text-green-400',
+                                            'bg-orange-500/10', 'border-orange-500/30', 'text-orange-400');
+      
+      responseText.textContent = message;
+
+      if (status === 'critical') {
+        responseBox.classList.add('bg-red-500/10', 'border-red-500/30', 'text-red-400');
+        responseIcon.innerHTML = ICONS.critical;
+      } else if (status === 'ok') {
+        responseBox.classList.add('bg-green-500/10', 'border-green-500/30', 'text-green-400');
+        responseIcon.innerHTML = ICONS.success;
+      } else {
+        // Network Error or unknown status fallback
+        responseBox.classList.add('bg-orange-500/10', 'border-orange-500/30', 'text-orange-400');
+        responseIcon.innerHTML = ICONS.error;
+      }
+    }
+
+    // Form Submit Handler
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      // 1. Set Loading State
+      submitBtn.disabled = true;
+      btnText.textContent = "Scanning for anomalies...";
+      loadingSpinner.classList.remove('hidden');
+      responseBox.classList.add('hidden');
+
+      // 2. Prepare FormData
+      const formData = new FormData();
+      // EXACT key name "data" as requested
+      formData.append('data', file);
+
+      try {
+        // 3. Network Request (Do NOT set Content-Type header)
+        const response = await fetch(N8N_WEBHOOK_URL, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        // 4. Parse Response JSON
+        const result = await response.json();
+        
+        // Expected format: {"status": "critical"|"ok", "message": "..."}
+        showResponse(result.status, result.message || JSON.stringify(result));
+
+      } catch (error) {
+        console.error('Scan failed:', error);
+        // Display Connection Error
+        showResponse('error', 'Connection to FlowGuard server failed.');
+      } finally {
+        // 5. Reset Loading State
+        submitBtn.disabled = false;
+        btnText.textContent = "Scan Pipe";
+        loadingSpinner.classList.add('hidden');
+      }
+    });
+  </script>
+</body>
+</html>

@@ -69,7 +69,7 @@ export default function LoginPage({ onSwitchToRegister }) {
             }
           }
         } catch (err) {
-          setError(err.message ?? 'Failed to initialize Microsoft Authenticator setup')
+          setError(err.message ?? 'Failed to initialize Google Authenticator setup')
         }
       }
       initMfa()
