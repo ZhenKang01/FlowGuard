@@ -32,11 +32,14 @@ function AccessDenied({ permission }) {
 }
 
 export default function ProtectedRoute({ children, permission }) {
-  const { user, loading } = useAuth()
+  const { user, aal, loading } = useAuth()
   const { can } = useRBAC()
 
   if (loading) return <LoadingScreen />
-  if (!user)   return <AuthScreen />
+  
+  // Enforce both a valid session AND AAL2 (MFA completion)
+  if (!user || (aal && aal.currentLevel !== 'aal2')) return <AuthScreen />
+  
   if (permission && !can(permission)) return <AccessDenied permission={permission} />
 
   return children

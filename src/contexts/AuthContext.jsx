@@ -29,16 +29,20 @@ async function fetchOrCreateProfile(userId, metadata) {
 export function AuthProvider({ children }) {
   const [user, setUser]       = useState(null)
   const [profile, setProfile] = useState(null)
+  const [aal, setAal]         = useState(null)
   const [loading, setLoading] = useState(true)
 
   const resolveSession = useCallback(async (session) => {
     const sessionUser = session?.user ?? null
     setUser(sessionUser)
     if (sessionUser) {
+      const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+      setAal(aalData)
       const p = await fetchOrCreateProfile(sessionUser.id, sessionUser.user_metadata)
       setProfile(p)
     } else {
       setProfile(null)
+      setAal(null)
     }
   }, [])
 
@@ -123,6 +127,43 @@ export function AuthProvider({ children }) {
     return data
   }
 
+  // MFA Functions
+  async function enrollMfa(friendlyName) {
+    const { data, error } = await supabase.auth.mfa.enroll({ 
+      factorType: 'totp',
+      friendlyName: friendlyName || 'Authenticator App'
+    })
+    if (error) throw error
+    return data
+  }
+
+  async function challengeMfa(factorId) {
+    const { data, error } = await supabase.auth.mfa.challenge({ factorId })
+    if (error) throw error
+    return data
+  }
+
+  async function verifyMfa(factorId, challengeId, code) {
+    const { data, error } = await supabase.auth.mfa.verify({ factorId, challengeId, code })
+    if (error) throw error
+    // Refresh session to upgrade to AAL2
+    const { data: sessionData } = await supabase.auth.getSession()
+    await resolveSession(sessionData.session)
+    return data
+  }
+  
+  async function listMfaFactors() {
+    const { data, error } = await supabase.auth.mfa.listFactors()
+    if (error) throw error
+    return data
+  }
+
+  async function unenrollMfa(factorId) {
+    const { data, error } = await supabase.auth.mfa.unenroll({ factorId })
+    if (error) throw error
+    return data
+  }
+
   // Role resolution: profiles table → app_metadata → user_metadata → viewer
   const role =
     profile?.role ??
@@ -132,9 +173,10 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{ 
-      user, profile, role, loading, 
+      user, profile, role, aal, loading, 
       signIn, signUp, signOut, verifyOtp,
-      resetPasswordForEmail, verifyPasswordResetOtp, updatePassword 
+      resetPasswordForEmail, verifyPasswordResetOtp, updatePassword,
+      enrollMfa, challengeMfa, verifyMfa, listMfaFactors, unenrollMfa
     }}>
       {children}
     </AuthContext.Provider>

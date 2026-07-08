@@ -1,11 +1,16 @@
-import { useState } from 'react'
-import { Droplets, Mail, Lock, AlertCircle, Eye, EyeOff, ArrowLeft, KeyRound } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Droplets, Mail, Lock, AlertCircle, Eye, EyeOff, ArrowLeft, KeyRound, Smartphone } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 import { useAuth } from '../../contexts/AuthContext'
 
 export default function LoginPage({ onSwitchToRegister }) {
-  const { signIn, resetPasswordForEmail, verifyPasswordResetOtp, updatePassword } = useAuth()
+  const { 
+    user, aal,
+    signIn, resetPasswordForEmail, verifyPasswordResetOtp, updatePassword,
+    enrollMfa, challengeMfa, verifyMfa, listMfaFactors, unenrollMfa
+  } = useAuth()
   
-  // 'login', 'forgot_email', 'forgot_otp', 'forgot_password'
+  // 'login', 'forgot_email', 'forgot_otp', 'forgot_password', 'mfa_enroll', 'mfa_challenge'
   const [viewMode, setViewMode]   = useState('login') 
   
   const [email, setEmail]         = useState('')
@@ -18,9 +23,58 @@ export default function LoginPage({ onSwitchToRegister }) {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
 
+  // MFA states
+  const [factorId, setFactorId]       = useState('')
+  const [challengeId, setChallengeId] = useState('')
+  const [mfaUri, setMfaUri]           = useState('')
+  const [mfaCode, setMfaCode]         = useState('')
+
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState(null)
   const [successMsg, setSuccessMsg] = useState(null)
+
+  // Auto-transition to MFA if user is AAL1
+  useEffect(() => {
+    if (user && aal && aal.currentLevel !== 'aal2') {
+      const initMfa = async () => {
+        try {
+          const factors = await listMfaFactors()
+          const totpFactors = factors.totp || (Array.isArray(factors) ? factors.filter(f => f.factor_type === 'totp') : [])
+          const verifiedFactor = totpFactors.find(f => f.status === 'verified')
+
+          if (verifiedFactor) {
+            setViewMode('mfa_challenge')
+            setFactorId(verifiedFactor.id)
+            const challenge = await challengeMfa(verifiedFactor.id)
+            setChallengeId(challenge.id)
+          } else {
+            setViewMode('mfa_enroll')
+            
+            // Clean up any unverified factors that might be stuck
+            const unverifiedFactors = totpFactors.filter(f => f.status === 'unverified')
+            for (const f of unverifiedFactors) {
+              try {
+                if (f.id) {
+                  await unenrollMfa(f.id)
+                }
+              } catch (e) {
+                console.error("Failed to unenroll stuck factor:", e)
+              }
+            }
+
+            const enroll = await enrollMfa(`Google Authenticator (${Date.now()})`)
+            setFactorId(enroll.id)
+            if (enroll.totp && enroll.totp.uri) {
+              setMfaUri(enroll.totp.uri)
+            }
+          }
+        } catch (err) {
+          setError(err.message ?? 'Failed to initialize Microsoft Authenticator setup')
+        }
+      }
+      initMfa()
+    }
+  }, [user, aal])
 
   async function handleLogin(e) {
     e.preventDefault()
@@ -28,8 +82,27 @@ export default function LoginPage({ onSwitchToRegister }) {
     setLoading(true)
     try {
       await signIn(email, password)
+      // Note: If MFA is required, the useEffect above will automatically catch it and change viewMode
     } catch (err) {
       setError(err.message ?? 'Invalid credentials. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleVerifyMfa(e) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      if (viewMode === 'mfa_enroll') {
+        const challenge = await challengeMfa(factorId)
+        await verifyMfa(factorId, challenge.id, mfaCode)
+      } else {
+        await verifyMfa(factorId, challengeId, mfaCode)
+      }
+    } catch (err) {
+      setError(err.message ?? 'Invalid authenticator code.')
     } finally {
       setLoading(false)
     }
@@ -75,8 +148,6 @@ export default function LoginPage({ onSwitchToRegister }) {
     setLoading(true)
     try {
       await updatePassword(newPassword)
-      // updating password successfully means we are logged in with the new password.
-      // the AuthContext onAuthStateChange will handle navigating to dashboard.
     } catch (err) {
       setError(err.message ?? 'Failed to update password.')
     } finally {
@@ -176,6 +247,82 @@ export default function LoginPage({ onSwitchToRegister }) {
                   className="w-full py-2.5 mt-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
                 >
                   {loading ? 'Signing in…' : 'Sign In'}
+                </button>
+              </form>
+            </>
+          )}
+
+          {viewMode === 'mfa_enroll' && (
+            <>
+              <h2 className="text-xl font-semibold text-white mb-1">Set up Authenticator</h2>
+              <p className="text-slate-400 text-sm mb-6">Scan this QR code with Google Authenticator to secure your account.</p>
+              
+              {renderError()}
+              
+              <div className="flex justify-center mb-6 bg-white p-4 rounded-xl mx-auto w-fit">
+                {mfaUri ? (
+                  <QRCodeSVG value={mfaUri} size={180} />
+                ) : (
+                  <div className="w-[180px] h-[180px] bg-slate-100 animate-pulse flex items-center justify-center rounded">
+                    <span className="text-slate-400 text-xs">Loading QR...</span>
+                  </div>
+                )}
+              </div>
+
+              <form onSubmit={handleVerifyMfa} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Enter 6-digit code</label>
+                  <div className="relative">
+                    <Smartphone className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      required
+                      value={mfaCode}
+                      onChange={e => setMfaCode(e.target.value)}
+                      placeholder="000000"
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all text-center tracking-widest text-lg font-medium"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading || !mfaCode}
+                  className="w-full py-2.5 mt-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
+                >
+                  {loading ? 'Verifying...' : 'Verify and Complete Setup'}
+                </button>
+              </form>
+            </>
+          )}
+
+          {viewMode === 'mfa_challenge' && (
+            <>
+              <h2 className="text-xl font-semibold text-white mb-1">Two-Factor Authentication</h2>
+              <p className="text-slate-400 text-sm mb-7">Enter the 6-digit code from your Authenticator app to continue.</p>
+              
+              {renderError()}
+              
+              <form onSubmit={handleVerifyMfa} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Authenticator Code</label>
+                  <div className="relative">
+                    <Smartphone className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      required
+                      value={mfaCode}
+                      onChange={e => setMfaCode(e.target.value)}
+                      placeholder="000000"
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all text-center tracking-widest text-lg font-medium"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading || !mfaCode}
+                  className="w-full py-2.5 mt-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
+                >
+                  {loading ? 'Verifying...' : 'Sign In'}
                 </button>
               </form>
             </>
