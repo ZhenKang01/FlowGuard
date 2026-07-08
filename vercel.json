@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/chat-api/(.*)",
+      "destination": "https://n8ngc.codeblazar.org/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
