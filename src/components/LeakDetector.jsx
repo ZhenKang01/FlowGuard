@@ -28,43 +28,21 @@ export default function LeakDetector() {
     };
 
     try {
-      // Prioritize Vite env variable; otherwise prefer the local network host
-      // because localhost:8000 is sometimes shadowed by another local service.
-      const envApiUrl = import.meta.env.VITE_FLOWGUARD_API_URL
-        ? `${import.meta.env.VITE_FLOWGUARD_API_URL}/predict`
-        : null;
-      const networkApiUrl = 'http://127.0.0.1:8000/predict';
-      const localhostApiUrl = 'http://localhost:8000/predict';
+      // Hardcoding the Vercel URL and adding a cache-buster to bypass browser CORS preflight caching
+      const envApiUrl = `https://flow-guard-backend.vercel.app/predict?_t=${Date.now()}`;
 
-      const attemptFetch = async (url) => {
-        return await fetch(url, {
+      let response;
+      try {
+        response = await fetch(envApiUrl, {
           method: 'POST',
           body: buildFormData(),
         });
-      };
-
-      const endpoints = [
-        envApiUrl,
-        networkApiUrl,
-        localhostApiUrl,
-      ].filter(Boolean);
-
-      let response;
-      let lastError = null;
-      for (const url of endpoints) {
-        try {
-          response = await attemptFetch(url);
-          if (response.ok) {
-            break;
-          }
-          lastError = new Error(`Server error (${response.status}) from ${url}`);
-        } catch (networkError) {
-          lastError = new Error(`Network/CORS error connecting to ${url}: ${networkError.message}`);
-        }
+      } catch (networkError) {
+        throw new Error(`Network/CORS error connecting to ${envApiUrl}: ${networkError.message}`);
       }
 
-      if (!response || !response.ok) {
-        throw lastError || new Error("Connection to PyTorch API failed.");
+      if (!response.ok) {
+        throw new Error(`Server error (${response.status}) from ${envApiUrl}`);
       }
 
       const data = await response.json();
