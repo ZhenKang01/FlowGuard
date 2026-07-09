@@ -54,11 +54,51 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Optional
 
+import base64
+import torch
+import torch.nn as nn
 import httpx
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
+
+
+def _load_dotenv(path: Path) -> None:
+    """Load simple KEY=VALUE pairs from a .env file into os.environ."""
+    if not path.exists():
+        return
+
+    try:
+        with path.open('r', encoding='utf-8') as file:
+            for line in file:
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+
+                key, value = line.split('=', 1)
+                key = key.strip()
+                value = value.strip()
+
+                if (value.startswith('"') and value.endswith('"')) or (
+                    value.startswith("'") and value.endswith("'")
+                ):
+                    value = value[1:-1]
+
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except Exception as exc:
+        logging.getLogger('flowguard.api').warning(
+            'Failed to load .env file %s: %s', path, exc
+        )
+
+
+# Load local environment overrides for development if present.
+root_dir = Path(__file__).resolve().parents[1]
+repo_root = Path(__file__).resolve().parents[2]
+_load_dotenv(root_dir / '.env')
+_load_dotenv(repo_root / '.env')
+_load_dotenv(repo_root / 'flowguard-ml-backend' / '.env')
 
 sys.path.insert(0, str(Path(__file__).parent))
 from inference import FlowGuardScorer, WINDOW_SIZE    # noqa: E402
@@ -142,6 +182,29 @@ class AlertCreate(BaseModel):
 # ── App lifecycle ─────────────────────────────────────────────────────────────
 _scorer: FlowGuardScorer | None = None
 _agent:  FlowGuardAgent  | None = None
+
+class FlowGuardAnomalyDetector(nn.Module):
+    def __init__(self):
+        super(FlowGuardAnomalyDetector, self).__init__()
+        self.layer1 = nn.Linear(2, 16)
+        self.relu = nn.ReLU()
+        self.layer2 = nn.Linear(16, 8)
+        self.output_layer = nn.Linear(8, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.relu(self.layer1(x))
+        x = self.relu(self.layer2(x))
+        x = self.sigmoid(self.output_layer(x))
+        return x
+
+_pytorch_model = FlowGuardAnomalyDetector()
+try:
+    model_path = Path(__file__).parent.parent.parent / 'flowguard_model.pth'
+    _pytorch_model.load_state_dict(torch.load(str(model_path), weights_only=True))
+    _pytorch_model.eval() 
+except Exception as e:
+    logger.warning(f"PyTorch model weights not found. {e}")
 
 
 @asynccontextmanager
@@ -305,6 +368,80 @@ def score(req: ScoreRequest, background_tasks: BackgroundTasks) -> ScoreResponse
         background_tasks.add_task(_notify_n8n, payload)
 
     return ScoreResponse(**result)
+
+
+# ── POST /predict ─────────────────────────────────────────────────────────────
+@app.post("/predict", summary="Predict leak from hour, flow rate and optional image")
+async def predict_leak(request: Request):
+    form = await request.form()
+    hour = int(form.get("hour"))
+    flow_rate = float(form.get("flow_rate"))
+    image = form.get("image") # UploadFile or None
+
+    if not (0 <= hour <= 23):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Hour must be between 0 and 23.")
+    if flow_rate < 0:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Flow rate cannot be negative.")
+
+    # 1. PyTorch Tabular Model Inference
+    scaled_flow = flow_rate / 150.0 
+    input_tensor = torch.tensor([[float(hour), scaled_flow]], dtype=torch.float32)
+    with torch.no_grad():
+        pytorch_probability = _pytorch_model(input_tensor).item()
+    
+    pytorch_leak = pytorch_probability > 0.5
+
+    # 2. Roboflow Image Inference (Optional)
+    roboflow_leak = False
+    roboflow_confidence = None
+    roboflow_message = "No image provided."
+
+    if image and hasattr(image, 'filename') and image.filename:
+        rf_api_key = os.getenv("ROBOFLOW_API_KEY")
+        rf_endpoint = os.getenv("ROBOFLOW_MODEL_ENDPOINT") # e.g. "my-project/1"
+
+        if not rf_api_key or not rf_endpoint:
+            roboflow_message = "Roboflow API Key or Endpoint not configured in backend."
+        else:
+            try:
+                image_bytes = await image.read()
+                url = f"https://detect.roboflow.com/{rf_endpoint}?api_key={rf_api_key}"
+                resp = httpx.post(
+                    url,
+                    files={"file": (image.filename or "upload.jpg", image_bytes, "application/octet-stream")},
+                    timeout=30.0,
+                    verify=False,
+                )
+                
+                if resp.status_code == 200:
+                    rf_data = resp.json()
+                    predictions = rf_data.get("predictions", [])
+                    # Look for "leak" class
+                    leak_preds = [p for p in predictions if p.get("class", "").lower() == "leak"]
+                    if leak_preds:
+                        roboflow_leak = True
+                        roboflow_confidence = max(p.get("confidence", 0) for p in leak_preds)
+                        roboflow_message = f"Leak detected in image (Confidence: {roboflow_confidence:.2f})"
+                    else:
+                        roboflow_message = "No leak detected in image."
+                else:
+                    roboflow_message = f"Roboflow API error: {resp.status_code} - {resp.text}"
+            except Exception as e:
+                roboflow_message = f"Failed to call Roboflow: {str(e)}"
+
+    # 3. Combine Results
+    is_leak_detected = pytorch_leak or roboflow_leak
+
+    return {
+        "leak_probability": round(pytorch_probability, 4),
+        "is_leak_detected": is_leak_detected,
+        "pytorch_detected": pytorch_leak,
+        "roboflow_detected": roboflow_leak,
+        "roboflow_message": roboflow_message,
+        "safety_protocol": "Acknowledge & Dispatch required." if is_leak_detected else "Normal."
+    }
 
 
 # ── GET /health ───────────────────────────────────────────────────────────────

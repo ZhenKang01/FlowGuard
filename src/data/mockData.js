@@ -21,8 +21,8 @@ export const alertsData = [
   {
     id: 1,
     location: 'Building A — 4th Floor Restroom',
-    lat: 37.7749,
-    lng: -122.4194, // SF generic center
+    lat: 1.29352,
+    lng: 103.85725, // Singapore center
     severity: 'Critical',
     timeDetected: '10 mins ago',
     waterWasted: '45 gal/hr',
@@ -32,8 +32,8 @@ export const alertsData = [
   {
     id: 2,
     location: 'Building C — Main Boiler Room',
-    lat: 37.7760,
-    lng: -122.4170,
+    lat: 1.29348,
+    lng: 103.85710,
     severity: 'Warning',
     timeDetected: '1 hr ago',
     waterWasted: '12 gal/hr',
@@ -43,8 +43,8 @@ export const alertsData = [
   {
     id: 3,
     location: 'Building B — Irrigation System',
-    lat: 37.7730,
-    lng: -122.4210,
+    lat: 1.29360,
+    lng: 103.85715,
     severity: 'Critical',
     timeDetected: '2 hrs ago',
     waterWasted: '80 gal/hr',
@@ -58,8 +58,8 @@ export const allAlertsData = [
   {
     id: 4,
     location: 'Building D — Cafeteria Sink',
-    lat: 37.7755,
-    lng: -122.4180,
+    lat: 1.29340,
+    lng: 103.85720,
     severity: 'Warning',
     timeDetected: '3 hrs ago',
     waterWasted: '8 gal/hr',
@@ -69,8 +69,8 @@ export const allAlertsData = [
   {
     id: 5,
     location: 'Building A — 2nd Floor Toilet',
-    lat: 37.7745,
-    lng: -122.4198,
+    lat: 1.29355,
+    lng: 103.85695,
     severity: 'Warning',
     timeDetected: '5 hrs ago',
     waterWasted: '5 gal/hr',
@@ -80,8 +80,8 @@ export const allAlertsData = [
   {
     id: 6,
     location: 'Building B — Parking Garage',
-    lat: 37.7725,
-    lng: -122.4220,
+    lat: 1.29335,
+    lng: 103.85710,
     severity: 'Critical',
     timeDetected: '6 hrs ago',
     waterWasted: '120 gal/hr',

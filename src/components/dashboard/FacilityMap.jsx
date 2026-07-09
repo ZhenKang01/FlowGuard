@@ -40,8 +40,8 @@ export default function FacilityMap({ alerts, onSelectAlert }) {
   // If no alerts provided (like on Dashboard), fallback to all active alerts
   const displayAlerts = alerts || allAlertsData.filter(a => a.status !== 'Resolved');
   
-  // Center of SF or average of all alerts
-  const center = [37.7745, -122.4190];
+  // Center of Singapore (Suntec City area) or average of all alerts
+  const center = [1.2935, 103.8572];
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 h-full flex flex-col overflow-hidden">
@@ -56,7 +56,7 @@ export default function FacilityMap({ alerts, onSelectAlert }) {
       <div className="flex-1 relative z-0 min-h-[300px]">
         <MapContainer 
           center={center} 
-          zoom={15} 
+          zoom={19} 
           style={{ height: '100%', width: '100%', zIndex: 0 }}
           zoomControl={false}
         >

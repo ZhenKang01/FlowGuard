@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { Plus, MoreHorizontal, Loader2 } from 'lucide-react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { Plus, MoreHorizontal, Loader2, Search, Download, ChevronDown, ChevronUp } from 'lucide-react'
 import Modal from '../components/ui/Modal'
 import Toast from '../components/ui/Toast'
 import { supabase } from '../lib/supabase'
@@ -35,7 +35,10 @@ function ContextMenu({ order, onClose, onAction, isAdmin }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose])
 
-  const actions = ['View Details', 'Mark Complete']
+  const actions = ['View Details']
+  if (order.status !== 'Resolved' && order.status !== 'Closed') {
+    actions.push('Mark Complete')
+  }
   if (isAdmin) actions.push('Delete Order')
   actions.push('Cancel')
 
@@ -70,6 +73,8 @@ export default function WorkOrdersPage() {
   const [form,          setForm]          = useState(EMPTY_FORM)
   const [submitting,    setSubmitting]    = useState(false)
   const [toast,         setToast]         = useState(null)
+  const [searchQuery,   setSearchQuery]   = useState('')
+  const [expandedRows,  setExpandedRows]  = useState(new Set())
 
   const reload = useCallback(() => {
     fetchWorkOrders().then(({ data }) => {
@@ -88,10 +93,21 @@ export default function WorkOrdersPage() {
   }, [reload])
 
   const filtered = orders.filter(o => {
-    if (activeTab === 'All')           return true
-    if (activeTab === 'High Priority') return o.severity === 'High'
-    if (activeTab === 'In Progress')   return o.status === 'In Progress'
-    if (activeTab === 'Completed')     return o.status === 'Resolved' || o.status === 'Closed'
+    let matchTab = true
+    if (activeTab === 'High Priority') matchTab = o.severity === 'High'
+    if (activeTab === 'In Progress')   matchTab = o.status === 'In Progress'
+    if (activeTab === 'Completed')     matchTab = o.status === 'Resolved' || o.status === 'Closed'
+    
+    if (!matchTab) return false
+
+    if (searchQuery.trim() !== '') {
+      const q = searchQuery.toLowerCase()
+      return (
+        (o.issue_type || '').toLowerCase().includes(q) ||
+        (o.location || '').toLowerCase().includes(q) ||
+        (o.description || '').toLowerCase().includes(q)
+      )
+    }
     return true
   })
 
@@ -100,6 +116,43 @@ export default function WorkOrdersPage() {
     'High Priority': orders.filter(o => o.severity === 'High').length,
     'In Progress':   orders.filter(o => o.status === 'In Progress').length,
     'Completed':     orders.filter(o => o.status === 'Resolved' || o.status === 'Closed').length,
+  }
+
+  const toggleRow = (id) => {
+    const newExpanded = new Set(expandedRows)
+    if (newExpanded.has(id)) newExpanded.delete(id)
+    else newExpanded.add(id)
+    setExpandedRows(newExpanded)
+  }
+
+  const handleExportCSV = () => {
+    if (filtered.length === 0) return setToast('No data to export')
+    const headers = ['ID', 'Task', 'Location', 'Severity', 'Status', 'Description', 'Created At']
+    const csvRows = [headers.join(',')]
+    
+    filtered.forEach(o => {
+      const escape = (val) => `"${(val || '').toString().replace(/"/g, '""')}"`
+      csvRows.push([
+        escape(o.id), escape(o.issue_type), escape(o.location), 
+        escape(o.severity), escape(o.status), escape(o.description), 
+        escape(new Date(o.created_at).toLocaleDateString())
+      ].join(','))
+    })
+    
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `WorkOrders_${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleStatusChange = async (id, newStatus) => {
+    const { error } = await updateWorkOrderStatus(id, newStatus)
+    if (error) { setToast(`Error: ${error.message}`); return }
+    setToast(`Status updated to ${newStatus}`)
+    reload()
   }
 
   const handleMenuAction = async (action, order) => {
@@ -150,14 +203,13 @@ export default function WorkOrdersPage() {
           <p className="text-slate-500 mt-1">Track and manage all maintenance tasks</p>
         </div>
         <div className="flex items-center space-x-3">
-          {isAdmin && (
-            <button
-              onClick={() => setToast('Viewing all facility logs (Not implemented)')}
-              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl shadow-sm transition-colors"
-            >
-              View All Logs
-            </button>
-          )}
+          <button
+            onClick={handleExportCSV}
+            className="flex items-center space-x-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl shadow-sm transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            <span className="hidden sm:inline">Export CSV</span>
+          </button>
           {isAdmin && (
             <button
               onClick={() => setShowNew(true)}
@@ -171,23 +223,37 @@ export default function WorkOrdersPage() {
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100">
-        <div className="flex items-center border-b border-slate-100 px-6 pt-4 space-x-6 overflow-x-auto">
-          {TABS.map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`pb-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                activeTab === tab
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              {tab}
-              <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${activeTab === tab ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
-                {counts[tab]}
-              </span>
-            </button>
-          ))}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 px-6 pt-4 gap-4">
+          <div className="flex items-center space-x-6 overflow-x-auto">
+            {TABS.map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`pb-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                  activeTab === tab
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {tab}
+                <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${activeTab === tab ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
+                  {counts[tab]}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="pb-3 flex items-center">
+            <div className="relative w-full sm:w-64">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search tasks..."
+                className="w-full bg-slate-50 border border-slate-200 text-sm rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-colors"
+              />
+            </div>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -209,39 +275,70 @@ export default function WorkOrdersPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filtered.map(order => (
-                  <tr key={order.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="p-4">
-                      <button onClick={() => setSelectedOrder(order)} className="text-left hover:text-blue-600 transition-colors">
-                        <div className="font-semibold text-slate-800">{order.issue_type}</div>
-                        <div className="text-xs text-slate-400 mt-0.5">{order.location}</div>
-                      </button>
-                    </td>
-                    <td className="p-4"><span className={priorityBadge(order.severity)}>{order.severity}</span></td>
-                    <td className="p-4">
-                      <div className="flex items-center text-slate-600 whitespace-nowrap">
-                        <StatusDot status={order.status} />{order.status}
-                      </div>
-                    </td>
-                    <td className="p-4 text-slate-500 hidden md:table-cell">
-                      {new Date(order.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="p-4 text-right relative">
-                      <button
-                        onClick={() => setOpenMenu(openMenu === order.id ? null : order.id)}
-                        className="text-slate-400 hover:text-slate-600 p-1 rounded transition-colors"
-                      >
-                        <MoreHorizontal className="w-5 h-5" />
-                      </button>
-                      {openMenu === order.id && (
-                        <ContextMenu order={order} onClose={() => setOpenMenu(null)} onAction={handleMenuAction} isAdmin={isAdmin} />
-                      )}
-                    </td>
-                  </tr>
+                  <React.Fragment key={order.id}>
+                    <tr className={`hover:bg-slate-50 transition-colors ${expandedRows.has(order.id) ? 'bg-slate-50' : ''}`}>
+                      <td className="p-4">
+                        <div className="flex items-start space-x-3">
+                          <button onClick={() => toggleRow(order.id)} className="mt-0.5 text-slate-400 hover:text-blue-600 transition-colors">
+                            {expandedRows.has(order.id) ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          </button>
+                          <div>
+                            <div className="font-semibold text-slate-800">{order.issue_type}</div>
+                            <div className="text-xs text-slate-400 mt-0.5">{order.location}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-4"><span className={priorityBadge(order.severity)}>{order.severity}</span></td>
+                      <td className="p-4">
+                        <div className="flex items-center text-slate-600 whitespace-nowrap">
+                          <StatusDot status={order.status} />
+                          <select
+                            value={order.status}
+                            onChange={(e) => handleStatusChange(order.id, e.target.value)}
+                            className="bg-transparent font-medium hover:bg-slate-100 rounded px-1 py-0.5 -ml-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+                          >
+                            <option value="Open">Open</option>
+                            <option value="In Progress">In Progress</option>
+                            <option value="Resolved">Resolved</option>
+                            <option value="Closed">Closed</option>
+                          </select>
+                        </div>
+                      </td>
+                      <td className="p-4 text-slate-500 hidden md:table-cell">
+                        {new Date(order.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="p-4 text-right relative">
+                        <button
+                          onClick={() => setOpenMenu(openMenu === order.id ? null : order.id)}
+                          className="text-slate-400 hover:text-slate-600 p-1 rounded transition-colors"
+                        >
+                          <MoreHorizontal className="w-5 h-5" />
+                        </button>
+                        {openMenu === order.id && (
+                          <ContextMenu order={order} onClose={() => setOpenMenu(null)} onAction={handleMenuAction} isAdmin={isAdmin} />
+                        )}
+                      </td>
+                    </tr>
+                    {expandedRows.has(order.id) && (
+                      <tr className="bg-slate-50">
+                        <td colSpan={5} className="px-11 py-4 border-t border-slate-100">
+                          <div className="text-sm text-slate-600 mb-2">
+                            <span className="font-semibold text-slate-700 mr-2">Description:</span>
+                            {order.description || <span className="italic text-slate-400">No description provided</span>}
+                          </div>
+                          <div className="flex items-center text-xs text-slate-500 space-x-4">
+                            <span><span className="font-medium">Source:</span> <span className="capitalize">{order.source}</span></span>
+                            <span><span className="font-medium">Reported by:</span> <span className="capitalize">{order.created_by_role}</span></span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
                 {filtered.length === 0 && (
                   <tr>
                     <td colSpan={5} className="p-12 text-center text-slate-400 text-sm">
-                      No work orders in this category.
+                      {searchQuery ? 'No work orders match your search.' : 'No work orders in this category.'}
                     </td>
                   </tr>
                 )}

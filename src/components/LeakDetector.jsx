@@ -6,6 +6,7 @@ import { Activity, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 export default function LeakDetector() {
   const [hour, setHour] = useState(14);
   const [flowRate, setFlowRate] = useState(135.0);
+  const [imageFile, setImageFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
@@ -16,28 +17,54 @@ export default function LeakDetector() {
     setError(null);
     setResult(null);
 
+    const buildFormData = () => {
+      const formData = new FormData();
+      formData.append('hour', hour);
+      formData.append('flow_rate', flowRate);
+      if (imageFile) {
+        formData.append('image', imageFile);
+      }
+      return formData;
+    };
+
     try {
-      // Prioritize Vite env variable, fallback to Next.js style if migrated later, then production Render backend
-      const API_URL = '/chat-api/webhook-test/roboflow-upload';
-      
-      let response;
-      try {
-        response = await fetch(API_URL, {
+      // Prioritize Vite env variable; otherwise prefer the local network host
+      // because localhost:8000 is sometimes shadowed by another local service.
+      const envApiUrl = import.meta.env.VITE_FLOWGUARD_API_URL
+        ? `${import.meta.env.VITE_FLOWGUARD_API_URL}/predict`
+        : null;
+      const networkApiUrl = 'http://127.0.0.1:8000/predict';
+      const localhostApiUrl = 'http://localhost:8000/predict';
+
+      const attemptFetch = async (url) => {
+        return await fetch(url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            hour: parseInt(hour, 10),
-            flow_rate: parseFloat(flowRate)
-          })
+          body: buildFormData(),
         });
-      } catch (networkError) {
-        throw new Error("Network/CORS error: Could not connect to the public API server.");
+      };
+
+      const endpoints = [
+        envApiUrl,
+        networkApiUrl,
+        localhostApiUrl,
+      ].filter(Boolean);
+
+      let response;
+      let lastError = null;
+      for (const url of endpoints) {
+        try {
+          response = await attemptFetch(url);
+          if (response.ok) {
+            break;
+          }
+          lastError = new Error(`Server error (${response.status}) from ${url}`);
+        } catch (networkError) {
+          lastError = new Error(`Network/CORS error connecting to ${url}: ${networkError.message}`);
+        }
       }
 
-      if (!response.ok) {
-        throw new Error(`Server error (${response.status}): The backend encountered an issue processing the request.`);
+      if (!response || !response.ok) {
+        throw lastError || new Error("Connection to PyTorch API failed.");
       }
 
       const data = await response.json();
@@ -91,6 +118,18 @@ export default function LeakDetector() {
                 onChange={(e) => setFlowRate(e.target.value)}
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800"
                 required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Pipe Image (Optional)
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setImageFile(e.target.files[0])}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
               />
             </div>
 
@@ -150,20 +189,29 @@ export default function LeakDetector() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Leak Probability</p>
-                  <p className="text-xl font-bold text-slate-800">
-                    {typeof result.leak_probability === 'number' 
-                      ? (result.leak_probability * 100).toFixed(2) + '%' 
-                      : result.leak_probability}
+                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Tabular Model</p>
+                  <p className={`text-lg font-bold ${result.pytorch_detected ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {result.pytorch_detected ? 'Leak Detected' : 'Normal'}
                   </p>
+                  <p className="text-xs text-slate-500 mt-1">Probability: {(result.leak_probability * 100).toFixed(1)}%</p>
                 </div>
                 
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Safety Protocol</p>
-                  <p className="text-sm font-semibold text-slate-800 break-words">
-                    {result.safety_protocol}
+                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Vision Model</p>
+                  <p className={`text-lg font-bold ${result.roboflow_detected ? 'text-red-600' : 'text-slate-700'}`}>
+                    {result.roboflow_detected ? 'Leak Detected' : 'Not Detected'}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1 line-clamp-2" title={result.roboflow_message}>
+                    {result.roboflow_message}
                   </p>
                 </div>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mt-4">
+                <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Safety Protocol</p>
+                <p className="text-sm font-semibold text-slate-800 break-words">
+                  {result.safety_protocol}
+                </p>
               </div>
             </div>
           )}

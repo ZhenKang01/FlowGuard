@@ -3,7 +3,9 @@ import io
 import torch
 import torch.nn as nn
 import uvicorn
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import base64
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+import requests
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pypdf import PdfReader
@@ -20,7 +22,7 @@ app = FastAPI(title="FlowGuard AI API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://flowguard-jet.vercel.app", "http://localhost:3000"],
+    allow_origins=["https://flowguard-jet.vercel.app", "http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,24 +51,73 @@ try:
 except Exception as e:
     print(f"Warning: Model weights not found. {e}")
 
-class SensorData(BaseModel):
-    hour: int
-    flow_rate: float
-
 @app.post("/predict")
-def predict_leak(data: SensorData):
-    scaled_flow = data.flow_rate / 150.0 
-    input_tensor = torch.tensor([[float(data.hour), scaled_flow]], dtype=torch.float32)
+async def predict_leak(request: Request):
+    form = await request.form()
+    hour = int(form.get("hour"))
+    flow_rate = float(form.get("flow_rate"))
+    image = form.get("image") # UploadFile or None
+
+    # 1. PyTorch Tabular Model Inference
+    scaled_flow = flow_rate / 150.0 
+    input_tensor = torch.tensor([[float(hour), scaled_flow]], dtype=torch.float32)
     with torch.no_grad():
-        probability = model(input_tensor).item()
+        pytorch_probability = model(input_tensor).item()
+    
+    pytorch_leak = pytorch_probability > 0.5
+
+    # 2. Roboflow Image Inference (Optional)
+    roboflow_leak = False
+    roboflow_confidence = None
+    roboflow_message = "No image provided."
+
+    if image and image.filename:
+        rf_api_key = os.getenv("ROBOFLOW_API_KEY")
+        rf_endpoint = os.getenv("ROBOFLOW_MODEL_ENDPOINT") # e.g. "my-project/1"
+
+        if not rf_api_key or not rf_endpoint:
+            roboflow_message = "Roboflow API Key or Endpoint not configured in backend."
+        else:
+            try:
+                image_bytes = await image.read()
+                image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+                url = f"https://detect.roboflow.com/{rf_endpoint}?api_key={rf_api_key}"
+                resp = requests.post(url, data=image_base64, headers={"Content-Type": "application/x-www-form-urlencoded"}, verify=False)
+                
+                if resp.status_code == 200:
+                    rf_data = resp.json()
+                    predictions = rf_data.get("predictions", [])
+                    # Look for "leak" class (Option B: Either model)
+                    leak_preds = [p for p in predictions if p.get("class", "").lower() == "leak"]
+                    if leak_preds:
+                        roboflow_leak = True
+                        roboflow_confidence = max(p.get("confidence", 0) for p in leak_preds)
+                        roboflow_message = f"Leak detected in image (Confidence: {roboflow_confidence:.2f})"
+                    else:
+                        roboflow_message = "No leak detected in image."
+                else:
+                    roboflow_message = f"Roboflow API error: {resp.status_code} - {resp.text}"
+            except Exception as e:
+                roboflow_message = f"Failed to call Roboflow: {str(e)}"
+
+    # 3. Combine Results
+    is_leak_detected = pytorch_leak or roboflow_leak
+
     return {
-        "leak_probability": round(probability, 4),
-        "is_leak_detected": probability > 0.5,
-        "safety_protocol": "Acknowledge & Dispatch required." if probability > 0.5 else "Normal."
+        "leak_probability": round(pytorch_probability, 4),
+        "is_leak_detected": is_leak_detected,
+        "pytorch_detected": pytorch_leak,
+        "roboflow_detected": roboflow_leak,
+        "roboflow_message": roboflow_message,
+        "safety_protocol": "Acknowledge & Dispatch required." if is_leak_detected else "Normal."
     }
 
-# 3. RAG Chatbot Infrastructure
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if openai_api_key:
+    openai_client = OpenAI(api_key=openai_api_key)
+else:
+    openai_client = None
+
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
