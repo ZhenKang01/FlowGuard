@@ -7,7 +7,7 @@ export default function LoginPage({ onSwitchToRegister }) {
   const { 
     user, aal,
     signIn, resetPasswordForEmail, verifyPasswordResetOtp, updatePassword,
-    enrollMfa, challengeMfa, verifyMfa, listMfaFactors, unenrollMfa
+    enrollMfa, challengeMfa, verifyMfa, listMfaFactors, unenrollMfa, signOut
   } = useAuth()
   
   // 'login', 'forgot_email', 'forgot_otp', 'forgot_password', 'mfa_enroll', 'mfa_challenge'
@@ -254,6 +254,17 @@ export default function LoginPage({ onSwitchToRegister }) {
 
           {viewMode === 'mfa_enroll' && (
             <>
+              <button 
+                type="button"
+                onClick={async () => { 
+                  await signOut(); 
+                  setViewMode('login'); 
+                  setError(null); 
+                }} 
+                className="flex items-center text-sm text-slate-400 hover:text-white mb-4 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4 mr-1.5" /> Cancel and sign out
+              </button>
               <h2 className="text-xl font-semibold text-white mb-1">Set up Authenticator</h2>
               <p className="text-slate-400 text-sm mb-6">Scan this QR code with Google Authenticator to secure your account.</p>
               
@@ -297,6 +308,17 @@ export default function LoginPage({ onSwitchToRegister }) {
 
           {viewMode === 'mfa_challenge' && (
             <>
+              <button 
+                type="button"
+                onClick={async () => { 
+                  await signOut(); 
+                  setViewMode('login'); 
+                  setError(null); 
+                }} 
+                className="flex items-center text-sm text-slate-400 hover:text-white mb-4 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4 mr-1.5" /> Cancel and sign out
+              </button>
               <h2 className="text-xl font-semibold text-white mb-1">Two-Factor Authentication</h2>
               <p className="text-slate-400 text-sm mb-7">Enter the 6-digit code from your Authenticator app to continue.</p>
               
