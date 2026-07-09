@@ -246,3 +246,16 @@ export const waterAnalyticsDataMonth = [
   { time: 'Week 4', usage: 79000, baseline: 76000 },
 ]
 
+export const suppliesUsageHistory = Array.from({ length: 30 }, (_, i) => {
+  const date = new Date(2026, 5, i + 1); // June 2026
+  return {
+    date: date.toISOString().split('T')[0],
+    'Soap Dispensers': Math.floor(Math.random() * 5) + 2,
+    'Toilet Paper': Math.floor(Math.random() * 20) + 10,
+    'Hand Sanitizer': Math.floor(Math.random() * 3) + 1,
+    'Cleaning Chemicals': Math.floor(Math.random() * 2) + 1,
+    'Paper Towels': Math.floor(Math.random() * 15) + 5,
+  }
+})
+
+
