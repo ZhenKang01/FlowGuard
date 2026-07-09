@@ -18,7 +18,7 @@ logger = logging.getLogger("flowguard.rag")
 _SYSTEM = """\
 You are FlowGuard's protocol assistant. Answer the user's question using ONLY the \
 documentation excerpts provided below. If the answer is not in the excerpts, say: \
-"I don't have specific documentation on that — please consult your facility manual or ask your supervisor."
+"I don't have specific documentation on that — please email support@flowguard.com for further assistance."
 
 Do not invent procedures, thresholds, or contact details. Keep your answer concise and action-oriented.
 
@@ -28,7 +28,7 @@ Documentation excerpts:
 
 _NOT_FOUND = (
     "I couldn't find relevant documentation for that question. "
-    "Please consult your facility manual or contact your supervisor directly."
+    "Please email support@flowguard.com for further assistance."
 )
 
 
