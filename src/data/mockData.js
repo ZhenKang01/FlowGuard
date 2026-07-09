@@ -228,3 +228,21 @@ export const meterReadings = {
   meter_03: [  6,  5,  4,  4,  4,  5, 14, 42, 72, 88, 82, 76, 64, 59, 55, 68, 80, 74, 56, 41, 28, 18, 11,  7 ],
   meter_04: [  5,  4,  3,  3,  3,  4, 13, 40, 70, 85, 78, 72, 60, 55, 52, 64, 76, 70, 52, 39, 26, 17, 10,  6 ],
 }
+
+export const waterAnalyticsDataWeek = [
+  { time: 'Mon', usage: 12000, baseline: 11000 },
+  { time: 'Tue', usage: 11500, baseline: 11000 },
+  { time: 'Wed', usage: 12450, baseline: 11500 },
+  { time: 'Thu', usage: 13000, baseline: 12000 },
+  { time: 'Fri', usage: 12800, baseline: 12000 },
+  { time: 'Sat', usage: 8000,  baseline: 8500  },
+  { time: 'Sun', usage: 7500,  baseline: 8000  },
+]
+
+export const waterAnalyticsDataMonth = [
+  { time: 'Week 1', usage: 75000, baseline: 76000 },
+  { time: 'Week 2', usage: 78000, baseline: 76000 },
+  { time: 'Week 3', usage: 77250, baseline: 76000 },
+  { time: 'Week 4', usage: 79000, baseline: 76000 },
+]
+

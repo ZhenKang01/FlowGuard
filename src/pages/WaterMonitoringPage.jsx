@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { waterAnalyticsData } from '../data/mockData'
+import { waterAnalyticsData, waterAnalyticsDataWeek, waterAnalyticsDataMonth } from '../data/mockData'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceArea,
@@ -24,6 +24,31 @@ const statusBadge = {
 
 export default function WaterMonitoringPage() {
   const [activeRange, setActiveRange] = useState('Today')
+
+  const chartData = activeRange === 'Today' ? waterAnalyticsData
+    : activeRange === 'This Week' ? waterAnalyticsDataWeek
+    : waterAnalyticsDataMonth
+
+  const kpis = activeRange === 'Today'
+    ? [
+        { icon: Droplets,     label: 'Total Today',  value: '12,450 gal', sub: 'Across all meters',  color: 'text-blue-600 bg-blue-50'    },
+        { icon: TrendingDown, label: 'vs Yesterday', value: '−8%',        sub: 'Below expected',     color: 'text-emerald-600 bg-emerald-50' },
+        { icon: Activity,     label: 'Peak Hour',    value: '3 PM',       sub: '1,250 gal/hr',       color: 'text-orange-600 bg-orange-50' },
+        { icon: Zap,          label: 'Avg Hourly',   value: '520 gal/hr', sub: 'Normal range',       color: 'text-violet-600 bg-violet-50' },
+      ]
+    : activeRange === 'This Week'
+    ? [
+        { icon: Droplets,     label: 'Total This Week',  value: '77,250 gal', sub: 'Across all meters',  color: 'text-blue-600 bg-blue-50'    },
+        { icon: TrendingDown, label: 'vs Last Week',     value: '+2%',        sub: 'Slight increase',    color: 'text-orange-600 bg-orange-50' },
+        { icon: Activity,     label: 'Peak Day',         value: 'Thu',        sub: '13,000 gal/d',       color: 'text-orange-600 bg-orange-50' },
+        { icon: Zap,          label: 'Avg Daily',        value: '11,035 gal', sub: 'Normal range',       color: 'text-violet-600 bg-violet-50' },
+      ]
+    : [
+        { icon: Droplets,     label: 'Total This Month', value: '309,250 gal', sub: 'Across all meters', color: 'text-blue-600 bg-blue-50'    },
+        { icon: TrendingDown, label: 'vs Last Month',    value: '−1%',         sub: 'Below expected',    color: 'text-emerald-600 bg-emerald-50' },
+        { icon: Activity,     label: 'Peak Week',        value: 'Week 4',      sub: '79,000 gal/w',      color: 'text-orange-600 bg-orange-50' },
+        { icon: Zap,          label: 'Avg Weekly',       value: '77,312 gal',  sub: 'Normal range',      color: 'text-violet-600 bg-violet-50' },
+      ]
 
   return (
     <div className="space-y-6">
@@ -50,12 +75,7 @@ export default function WaterMonitoringPage() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { icon: Droplets,     label: 'Total Today',  value: '12,450 gal', sub: 'Across all meters',  color: 'text-blue-600 bg-blue-50'    },
-          { icon: TrendingDown, label: 'vs Yesterday', value: '−8%',        sub: 'Below expected',     color: 'text-emerald-600 bg-emerald-50' },
-          { icon: Activity,     label: 'Peak Hour',    value: '3 PM',       sub: '1,250 gal/hr',       color: 'text-orange-600 bg-orange-50' },
-          { icon: Zap,          label: 'Avg Hourly',   value: '520 gal/hr', sub: 'Normal range',       color: 'text-violet-600 bg-violet-50' },
-        ].map(({ icon: Icon, label, value, sub, color }) => (
+        {kpis.map(({ icon: Icon, label, value, sub, color }) => (
           <div key={label} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${color}`}>
               <Icon className="w-5 h-5" />
@@ -74,20 +94,23 @@ export default function WaterMonitoringPage() {
             <p className="text-sm text-slate-500 mt-1">Actual usage vs expected baseline — {activeRange}</p>
           </div>
           <span className="text-xs font-semibold text-red-600 bg-red-50 px-3 py-1.5 rounded-full">
-            Spike detected at 3 PM
+            {activeRange === 'Today' ? 'Spike detected at 3 PM' : 'No recent anomalies'}
           </span>
         </div>
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={waterAnalyticsData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+            <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
               <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
               <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-              <ReferenceArea x1="12 PM" x2="6 PM" fill="#fee2e2" fillOpacity={0.4} />
+              {activeRange === 'Today' && (
+                <ReferenceArea x1="12 PM" x2="6 PM" fill="#fee2e2" fillOpacity={0.4} />
+              )}
               <Line type="monotone" dataKey="baseline" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Baseline" />
               <Line type="monotone" dataKey="usage" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6, stroke: '#3b82f6', strokeWidth: 2, fill: '#fff' }} name="Actual (gal)" />
             </LineChart>
+
           </ResponsiveContainer>
         </div>
       </div>
