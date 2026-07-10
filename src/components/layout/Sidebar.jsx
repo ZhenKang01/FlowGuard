@@ -49,7 +49,7 @@ export default function Sidebar({ activePage, onNavigate }) {
     <aside className="flex flex-col h-full bg-slate-900 text-slate-300 border-r border-slate-800 shadow-xl">
       <div className="h-16 flex items-center px-6 border-b border-slate-800 bg-slate-950/50 shrink-0">
         <Droplets className="w-8 h-8 text-blue-500 mr-3" />
-        <span className="text-xl font-bold text-white tracking-tight">FlowGuard</span>
+        <span className="text-xl font-bold text-white tracking-tight">flowguard</span>
       </div>
 
       <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-1">

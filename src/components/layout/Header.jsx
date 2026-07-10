@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Bell, Search, Menu, Building, ChevronDown, Download, X, CheckCircle } from 'lucide-react'
+import { Droplets, Bell, Search, Menu, Building, ChevronDown, Download, X, CheckCircle } from 'lucide-react'
 import { buildingsList, notificationsData } from '../../data/mockData'
 
 const PAGE_TITLES = {
@@ -47,9 +47,12 @@ export default function Header({ onMenuClick, activePage, onNavigate }) {
         >
           <Menu className="w-5 h-5" />
         </button>
-        <h1 className="text-xl font-semibold text-slate-800 hidden sm:block">
-          {PAGE_TITLES[activePage] ?? 'FlowGuard'}
-        </h1>
+        <div className="flex items-center hidden sm:flex">
+          <Droplets className="w-6 h-6 text-blue-500 mr-2" />
+          <h1 className="text-xl font-semibold text-slate-800 tracking-tight">
+            flowguard
+          </h1>
+        </div>
       </div>
 
       <div className="flex items-center space-x-3 lg:space-x-4">

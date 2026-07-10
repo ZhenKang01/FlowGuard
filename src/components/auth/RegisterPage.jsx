@@ -149,7 +149,7 @@ export default function RegisterPage({ onSwitchToLogin }) {
           <div className="w-12 h-12 bg-blue-600/20 rounded-2xl flex items-center justify-center mr-3 ring-1 ring-blue-500/30">
             <Droplets className="w-6 h-6 text-blue-400" />
           </div>
-          <span className="text-3xl font-bold text-white tracking-tight">FlowGuard</span>
+          <span className="text-3xl font-bold text-white tracking-tight">flowguard</span>
         </div>
 
         {/* Card */}
